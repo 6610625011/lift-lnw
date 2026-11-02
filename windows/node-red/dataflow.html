@@ -1,0 +1,91 @@
+<template>
+  <div class="df">
+    <div class="df-head">
+      <div><div class="eyebrow">DATA FLOW · เห็นข้อมูลวิ่งจริงระหว่างส่วนต่าง ๆ</div><h1>ระบบส่งข้อมูลหากันอย่างไร</h1>
+        <p>ทุกแถวด้านล่างคือข้อความ MQTT จริงที่ Node-RED รับ/ส่ง ไม่ใช่ภาพประกอบ</p></div>
+      <a class="navlink" href="/dashboard/elevators">← กลับหน้าลิฟต์</a>
+    </div>
+
+    <div class="source" :class="srcClass">{{ srcText }}</div>
+
+    <section class="card">
+      <h2>เส้นทางของข้อมูล</h2>
+      <div class="pipe">
+        <div class="node" :class="{on: hops.esp, off: !hops.esp}"><b>ESP32</b><small>{{ hops.emulator ? 'ตัวจำลอง (fake-esp32)' : 'บอร์ดจริง' }}<br>ปุ่ม · LCD · LED<br>ลิฟต์ 4 ตัวจำลอง</small><i>{{ hops.esp ? 'ออนไลน์' : 'ไม่มีสัญญาณ' }}</i></div>
+        <div class="link"><span class="dot up" :class="{go: upActive}"></span><span class="dot down" :class="{go: downActive}"></span><em>Wi-Fi<br>MQTT</em></div>
+        <div class="node" :class="{on: hops.broker, off: !hops.broker}"><b>Mosquitto</b><small>MQTT broker<br>(Raspberry Pi / PC)<br>ตัวกลางส่งข้อความ</small><i>{{ hops.broker ? 'เชื่อมต่อ' : 'ไม่เชื่อมต่อ' }}</i></div>
+        <div class="link"><span class="dot up" :class="{go: upActive}"></span><span class="dot down" :class="{go: downActive}"></span><em>MQTT</em></div>
+        <div class="node on"><b>Node-RED</b><small>ตรวจข้อมูล<br>สร้างคำสั่ง<br>(Raspberry Pi / PC)</small><i>ทำงาน</i></div>
+        <div class="link"><span class="dot up" :class="{go: upActive}"></span><span class="dot down" :class="{go: downActive}"></span><em>HTTP<br>WebSocket</em></div>
+        <div class="node on"><b>Dashboard</b><small>เบราว์เซอร์<br>มือถือ / คอม</small><i>หน้านี้</i></div>
+      </div>
+      <p class="legend"><span class="dot up go static"></span> สถานะลิฟต์ / เหตุการณ์ วิ่งจาก ESP32 ไปหน้าเว็บ &nbsp;&nbsp; <span class="dot down go static"></span> คำสั่งเรียกลิฟต์ / เลือกชั้น วิ่งจากหน้าเว็บกลับไป ESP32 &nbsp;(จุดจะกระพริบเมื่อมีข้อความผ่านจริงภายใน 2 วินาทีที่ผ่านมา)</p>
+      <div class="try"><button :disabled="!canTry" :title="canTry ? '' : 'ใช้ได้เมื่อลิฟต์ว่าง'" @click="send({topic:'verify',payload:1})">ลองส่งคำสั่ง "เรียกลิฟต์จากชั้น 1" จากหน้านี้</button><span>แล้วดูแถวสีส้ม (คำสั่งลงไป) ตามด้วยแถวสีเขียว (บอร์ดตอบกลับ) ในตารางด้านล่าง</span></div>
+    </section>
+
+    <section class="card">
+      <h2>หัวข้อ (topic) ที่ใช้</h2>
+      <table><thead><tr><th>topic</th><th>ทิศทาง</th><th>หน้าที่</th><th>จำนวนที่เห็น</th><th>ล่าสุด</th></tr></thead>
+        <tbody>
+          <tr v-for="t in topics" :key="t.name"><td><code>elevator/v1/mockup/{{ t.name }}</code></td><td>{{ t.dir }}</td><td>{{ t.what }}</td><td><b>{{ (view.counts||{})[t.name] || 0 }}</b></td><td>{{ age(t.name) }}</td></tr>
+        </tbody></table>
+    </section>
+
+    <section class="card">
+      <h2>ข้อความล่าสุด (ใหม่สุดอยู่บน)</h2>
+      <label class="flt"><input type="checkbox" v-model="hideState"> ซ่อนข้อความ "สถานะ" (ส่งทุก 1 วินาที) เพื่อดูเหตุการณ์และคำสั่งได้ง่าย</label>
+      <div class="log">
+        <details v-for="(m,i) in shown" :key="m.t+'-'+i" :class="[m.name, m.dir]">
+          <summary><time>{{ new Date(m.t).toLocaleTimeString('th-TH') }}</time><span class="tag">{{ tag(m) }}</span><span class="txt">{{ m.text }}</span></summary>
+          <pre>{{ m.raw }}</pre>
+        </details>
+        <p v-if="!shown.length" class="empty">ยังไม่เห็นข้อความ — เปิดบอร์ด/ตัวจำลอง แล้วรอสักครู่</p>
+      </div>
+    </section>
+
+    <section class="card how">
+      <h2>อ่านภาพนี้อย่างไร</h2>
+      <ol>
+        <li><b>ESP32</b> คำนวณตำแหน่งลิฟต์ แล้วส่งสถานะเข้า <b>Mosquitto</b> ด้วย MQTT (topic <code>state</code>)</li>
+        <li><b>Node-RED</b> สมัครรับ topic เดียวกัน ตรวจข้อมูล แล้วส่งต่อไปยัง <b>Dashboard</b> ที่คุณเปิดอยู่</li>
+        <li>เมื่อกดปุ่มบน Dashboard Node-RED สร้างคำสั่ง (topic <code>request</code>) ส่งผ่าน Mosquitto กลับไปหา ESP32</li>
+        <li>ESP32 ตรวจคำสั่ง แล้วตอบ <code>events</code> ว่า accepted / busy / expired แล้วสถานะใหม่ก็ไหลกลับมาแสดงบนหน้าเว็บ</li>
+      </ol>
+    </section>
+  </div>
+</template>
+<script>
+export default {
+  data() { return { hideState: true, clock: Date.now(), offset: 0 }; },
+  mounted() { this._t = setInterval(() => { this.clock = Date.now(); }, 500); },
+  beforeUnmount() { clearInterval(this._t); },
+  watch: { 'msg.payload.now': { immediate: true, handler(v) { if (v) this.offset = v - Date.now(); } } },
+  computed: {
+    view() { return this.msg?.payload || {}; },
+    hops() { return this.view.hops || {}; },
+    serverNow() { return this.clock + this.offset; },
+    upActive() { const l = this.view.last || {}; return this.serverNow - Math.max(l.state || 0, l.events || 0) < 2000; },
+    downActive() { const l = this.view.last || {}; return this.serverNow - (l.request || 0) < 2500; },
+    canTry() { return !!this.hops.fresh && ['idle','arrived'].includes(this.hops.phase); },
+    srcClass() { return !this.hops.fresh ? 'wait' : this.hops.emulator ? 'emu' : 'real'; },
+    srcText() {
+      if (!this.hops.fresh) return 'ยังไม่ได้รับข้อมูลสดจากบอร์ด — ตรวจว่า ESP32 (หรือตัวจำลอง) และ broker ทำงานอยู่';
+      return this.hops.emulator ? 'ข้อมูลตอนนี้มาจาก "ตัวจำลอง ESP32" (scripts/fake-esp32.cjs) ที่พูด MQTT เหมือนบอร์ดจริง — ยังไม่ใช่บอร์ดจริง' : 'ข้อมูลตอนนี้มาจากบอร์ด ESP32 จริง (boot_id ' + this.hops.boot + ')';
+    },
+    topics() { return [
+      {name: 'state', dir: 'ESP32 → Dashboard', what: 'ชั้นของลิฟต์ A–D, phase, ลิฟต์ที่ถูกเลือก, ข้อความ LCD (ส่งทุก 1 วินาที)'},
+      {name: 'events', dir: 'ESP32 → Dashboard', what: 'เหตุการณ์: มอบหมายลิฟต์ ถึงจุดรับ เลือกชั้น ถึงปลายทาง และผลตอบรับคำสั่ง'},
+      {name: 'availability', dir: 'ESP32/broker → Dashboard', what: 'online/offline (Last Will เมื่อบอร์ดหลุด)'},
+      {name: 'request', dir: 'Dashboard → ESP32', what: 'คำสั่งเรียกลิฟต์ / เลือกชั้น พร้อมรหัสคำขอและอายุ 5 วินาที'}
+    ]; },
+    shown() { return (this.view.log || []).filter(m => !(this.hideState && m.name === 'state')).slice(0, 25); }
+  },
+  methods: {
+    age(name) { const t = (this.view.last || {})[name]; if (!t) return '—'; const s = Math.max(0, Math.round((this.serverNow - t) / 1000)); return s + ' วินาทีที่แล้ว'; },
+    tag(m) { return m.dir === 'down' ? '↓ คำสั่ง' : m.name === 'events' ? '↑ เหตุการณ์' : m.name === 'state' ? '↑ สถานะ' : '↑ ' + m.name; }
+  }
+}
+</script>
+<style>
+.df{max-width:1240px;margin:auto;padding:12px 6px 28px;color:#172a3a;font-family:Tahoma,'Segoe UI',sans-serif}.df .eyebrow{font-size:11px;font-weight:700;letter-spacing:2px;color:#526b7b}.df h1{font-size:28px;margin:8px 0 3px}.df p{color:#607482;margin:0}.df-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin:8px 0 18px}.df .navlink{font-size:13px;color:#126c82;text-decoration:none;white-space:nowrap}.source{padding:11px 16px;border-radius:9px;font-size:14px;font-weight:700;margin-bottom:18px}.source.emu{background:#fff3d6;color:#8a5a00}.source.real{background:#e4f5ec;color:#18764e}.source.wait{background:#fff0d4;color:#875c14}.card{background:#fff;border:1px solid #dce5eb;border-radius:14px;padding:20px 22px;margin-bottom:18px}.card h2{font-size:16px;margin:0 0 14px}.pipe{display:flex;align-items:stretch;gap:0}.node{flex:1 1 0;min-width:0;border:2px solid #cfdae1;border-radius:12px;padding:12px 10px;text-align:center;background:#f6f9fb}.node b{display:block;font-size:16px}.node small{display:block;color:#5d7381;font-size:12px;line-height:1.5;margin:6px 0 8px}.node i{display:inline-block;font-style:normal;font-size:11px;font-weight:700;border-radius:10px;padding:2px 10px;background:#e0e8ec;color:#5d7381}.node.on{border-color:#12819a;background:#f1fbfd}.node.on i{background:#12819a;color:#fff}.node.off{border-color:#e0b3a8;background:#fdf3f0}.node.off i{background:#c0583e;color:#fff}.link{flex:0 0 70px;position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px}.link em{font-style:normal;font-size:10px;color:#6f8593;text-align:center;line-height:1.3}.link:before{content:'';position:absolute;left:0;right:0;top:50%;border-top:2px dashed #b6c7d1}.dot{position:relative;z-index:1;width:12px;height:12px;border-radius:50%;background:#cfdae1}.dot.up.go{background:#16a36a;box-shadow:0 0 0 4px rgba(22,163,106,.25);animation:blink .6s infinite alternate}.dot.down.go{background:#e8820c;box-shadow:0 0 0 4px rgba(232,130,12,.25);animation:blink .6s infinite alternate}.dot.static{display:inline-block;vertical-align:middle;animation:none!important}@keyframes blink{to{opacity:.35}}.legend{font-size:12px;margin-top:14px}.try{margin-top:14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}.try button{background:#126c82;color:#fff;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}.try button:disabled{background:#d7e1e6;color:#7b8e9a;cursor:default}.try span{font-size:12px;color:#647786}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #eef2f4;vertical-align:top}th{color:#647786;font-weight:600;font-size:12px}code{background:#eef3f6;border-radius:4px;padding:1px 5px;font-size:12px}.flt{display:block;font-size:12px;color:#587080;margin-bottom:10px}.log details{border-bottom:1px solid #eef2f4;padding:7px 0;font-size:13px}.log summary{display:flex;gap:12px;align-items:baseline;cursor:pointer;list-style:none}.log time{color:#78909c;white-space:nowrap;font-size:12px}.tag{font-size:11px;font-weight:700;border-radius:8px;padding:1px 8px;white-space:nowrap;background:#e4f5ec;color:#18764e}.log details.down .tag{background:#ffe9cf;color:#a85a00}.log details.events .tag{background:#e0f2fe;color:#075985}.log pre{margin:8px 0 2px;background:#f3f6f8;border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;word-break:break-all}.empty{padding:14px 0}.how ol{margin:0;padding-left:20px;line-height:1.9;font-size:14px}@media(max-width:850px){.pipe{flex-direction:column}.link{flex:0 0 46px;flex-direction:row;justify-content:center}.link:before{left:50%;right:auto;top:0;bottom:0;border-top:0;border-left:2px dashed #b6c7d1}.link em{display:none}.df-head{flex-direction:column}}
+</style>

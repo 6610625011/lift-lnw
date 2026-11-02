@@ -1,0 +1,74 @@
+// Software stand-in for the ESP32 firmware (src/main.cpp + include/elevator_sim.h + src/network.cpp).
+// Speaks the SAME MQTT protocol: retained state each second + on change, events, availability LWT,
+// request validation (boot_id, 5 s expiry, 32-entry dedupe), actions verify/call(+floor)/select(+floor).
+// For testing Node-RED + broker + dashboard on a PC without the real board.
+// Env: MQTT_HOST (127.0.0.1)   SPEED (1 = real 2 s/floor, 4 = four times faster)
+const fs = require('fs'), path = require('path'), crypto = require('crypto');
+const mqtt = require(path.resolve(__dirname, '../windows/node-red/node_modules/mqtt'));
+const secrets = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../windows/local-secrets.json')));
+const SPEED = Number(process.env.SPEED || 1);
+const T = 'elevator/v1/mockup/';
+const { createSim } = require('./lib/sim-core.cjs');
+const boot = crypto.randomBytes(8).toString('hex');
+const t0 = Date.now(), uptime = () => Date.now() - t0;
+const S = createSim({ config: {
+  stepMs: 2000 / SPEED, doorMs: 2000 / SPEED, selectTimeoutMs: 30000 / SPEED, arrivalMs: 10000 / SPEED,
+  ambientCheckMs: 3000 / SPEED, ambientDwellMs: 4000 / SPEED,
+} });
+const sim = S.sim, lcd = S.lcd;
+const request = (hall) => S.request(Date.now(), hall);
+const selectFloor = (f) => S.selectFloor(Date.now(), f);
+const tick = (() => {
+  let prev = '';
+  return () => {
+    S.tick(Date.now());
+    const sig = JSON.stringify(S.stateBody());
+    const changed = sig !== prev; prev = sig; return changed;
+  };
+})();
+
+const client = mqtt.connect(`mqtt://${process.env.MQTT_HOST || '127.0.0.1'}:1883`, {
+  clientId: 'elevator-' + boot, username: secrets.mqttUser, password: secrets.mqttPassword, keepalive: 10, reconnectPeriod: 5000,
+  will: { topic: T + 'availability', payload: 'offline', qos: 1, retain: true },
+});
+const publishState = () => client.publish(T + 'state', JSON.stringify({
+  boot_id: boot, uptime_ms: uptime(), ...S.stateBody(), emulator: true,
+}), { retain: true });
+const event = (type, source, id = '') => client.publish(T + 'events', JSON.stringify({ type, source, request_id: id, boot_id: boot, uptime_ms: uptime() }));
+const names = { coming: 'coming', boarding: 'pickup', riding: 'riding', arrived: 'arrival', idle: 'ready' };
+const previous = []; // bounded 32-entry dedupe, like the firmware
+
+client.on('connect', () => {
+  console.log(`fake ESP32 online, boot_id ${boot}, speed x${SPEED}`);
+  client.subscribe(T + 'request', { qos: 1 });
+  client.publish(T + 'availability', 'online', { retain: true });
+  publishState();
+});
+client.on('error', (e) => console.error('MQTT error:', e.message));
+client.on('message', (topic, buf) => {
+  let m; try { m = JSON.parse(buf.toString()); } catch { return; }
+  const call = m.action === 'verify' || m.action === 'call', select = m.action === 'select';
+  if (!(call || select) || !m.request_id || m.request_id.length > 64 || typeof m.boot_id !== 'string' || m.boot_id.length !== 16 || !Number.isInteger(m.issued_uptime_ms)) return;
+  if (select && !(Number.isInteger(m.floor) && m.floor >= 1 && m.floor <= 20)) return;
+  let result;
+  const dup = previous.find((p) => p.id === m.request_id);
+  if (m.boot_id !== boot) result = 'expired';
+  else if (dup) result = dup.result;
+  else if (uptime() - m.issued_uptime_ms > 5000) result = 'expired';
+  else if (select) { result = selectFloor(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('selected', 'dashboard'); } }
+  else { const from = Number.isInteger(m.floor) ? m.floor : 0; result = request(from) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('assigned', 'dashboard'); } }
+  if (!dup) { previous.push({ id: m.request_id, result }); if (previous.length > 32) previous.shift(); }
+  event(result, 'dashboard', m.request_id);
+  console.log(`${new Date().toLocaleTimeString()} ${m.action}${m.floor ? ' ' + m.floor : ''} -> ${result}   LCD: ${lcd().join(' / ')}`);
+});
+let lastPub = 0, lastPhase = sim.phase;
+setInterval(() => {
+  const changed = tick();
+  if (changed) {
+    console.log(`${new Date().toLocaleTimeString()} ${sim.phase}  floors ${sim.cars.map((c) => c.id + c.floor + (c.mode === 'free' ? '' : '>' + c.target)).join(' ')}  LCD: ${lcd().join(' / ')}`);
+    if (sim.phase !== lastPhase) event(names[sim.phase], 'simulation');
+    lastPhase = sim.phase;
+  }
+  if (changed || Date.now() - lastPub >= 1000) { if (client.connected) publishState(); lastPub = Date.now(); }
+}, 100);
+process.on('SIGINT', () => client.end(false, () => process.exit(0)));

@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Localhost stand-in for Mosquitto (aedes) used with scripts/fake-esp32.cjs when no board/Pi is available",
+  "dependencies": {
+    "aedes": "^0.51.3"
+  }
+}

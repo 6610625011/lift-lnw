@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+<rect width="100%" height="100%" fill="white"/>
+<text x="85" y="70" font-family="Arial, sans-serif" font-size="39" fill="#19313D" font-weight="bold" text-anchor="start">Simple elevator mockup circuit</text>
+<text x="85" y="112" font-family="Arial, sans-serif" font-size="26" fill="#5C6D76" font-weight="normal" text-anchor="start">ESP32-WROOM-32 + I2C LCD + one status LED + verification button</text>
+<polyline points="85,145 1515,145" fill="none" stroke="#D2DCE2" stroke-width="2" stroke-linejoin="round"/>
+<rect x="200" y="215" width="380" height="650" fill="#F3F7F9" stroke="#19313D" stroke-width="3"/>
+<text x="390" y="272" font-family="Arial, sans-serif" font-size="37" fill="#19313D" font-weight="bold" text-anchor="middle">ESP32</text>
+<text x="390" y="309" font-family="Arial, sans-serif" font-size="23" fill="#5C6D76" font-weight="normal" text-anchor="middle">WROOM-32 development board</text>
+<rect x="1070" y="215" width="350" height="350" fill="#F3F7F9" stroke="#19313D" stroke-width="3"/>
+<text x="1245" y="272" font-family="Arial, sans-serif" font-size="37" fill="#19313D" font-weight="bold" text-anchor="middle">LCD</text>
+<text x="1245" y="309" font-family="Arial, sans-serif" font-size="23" fill="#5C6D76" font-weight="normal" text-anchor="middle">HD44780 / 16x2 / 0x27</text>
+<text x="558" y="373" font-family="Arial, sans-serif" font-size="27" fill="#C13636" font-weight="normal" text-anchor="end">3V3</text>
+<polyline points="580,365 1070,365" fill="none" stroke="#C13636" stroke-width="4" stroke-linejoin="round"/>
+<text x="1092" y="373" font-family="Arial, sans-serif" font-size="27" fill="#C13636" font-weight="normal" text-anchor="start">VCC</text>
+<text x="558" y="423" font-family="Arial, sans-serif" font-size="27" fill="#19313D" font-weight="normal" text-anchor="end">GND</text>
+<polyline points="580,415 1070,415" fill="none" stroke="#19313D" stroke-width="4" stroke-linejoin="round"/>
+<text x="1092" y="423" font-family="Arial, sans-serif" font-size="27" fill="#19313D" font-weight="normal" text-anchor="start">GND</text>
+<text x="558" y="473" font-family="Arial, sans-serif" font-size="27" fill="#087D75" font-weight="normal" text-anchor="end">GPIO21</text>
+<polyline points="580,465 1070,465" fill="none" stroke="#087D75" stroke-width="4" stroke-linejoin="round"/>
+<text x="1092" y="473" font-family="Arial, sans-serif" font-size="27" fill="#087D75" font-weight="normal" text-anchor="start">SDA</text>
+<text x="558" y="523" font-family="Arial, sans-serif" font-size="27" fill="#087D75" font-weight="normal" text-anchor="end">GPIO22</text>
+<polyline points="580,515 1070,515" fill="none" stroke="#087D75" stroke-width="4" stroke-linejoin="round"/>
+<text x="1092" y="523" font-family="Arial, sans-serif" font-size="27" fill="#087D75" font-weight="normal" text-anchor="start">SCL</text>
+<text x="825" y="345" font-family="Arial, sans-serif" font-size="22" fill="#C13636" font-weight="normal" text-anchor="middle">VCC = 3V3 as currently wired</text>
+<text x="558" y="683" font-family="Arial, sans-serif" font-size="27" fill="#BD6519" font-weight="normal" text-anchor="end">GPIO25</text>
+<polyline points="580,675 725,675" fill="none" stroke="#BD6519" stroke-width="4" stroke-linejoin="round"/>
+<rect x="725" y="663" width="140" height="24" fill="white" stroke="#19313D" stroke-width="3"/>
+<text x="795" y="634" font-family="Arial, sans-serif" font-size="24" fill="#19313D" font-weight="bold" text-anchor="middle">R1  330 ohms</text>
+<polyline points="865,675 1090,675" fill="none" stroke="#BD6519" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1090,650 1090,700 1140,675 1090,650" fill="none" stroke="#BD6519" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,648 1140,702" fill="none" stroke="#BD6519" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1140,675 1395,675" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1395,675 1395,690" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1373,690 1417,690" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1381,700 1409,700" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1389,710 1401,710" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<text x="1395" y="741" font-family="Arial, sans-serif" font-size="22" fill="#5C6D76" font-weight="normal" text-anchor="middle">GND</text>
+<polyline points="1110,634 1140,604" fill="none" stroke="#BD6519" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1128,606 1140,604 1138,616" fill="none" stroke="#BD6519" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1135,638 1165,608" fill="none" stroke="#BD6519" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1153,610 1165,608 1163,620" fill="none" stroke="#BD6519" stroke-width="3" stroke-linejoin="round"/>
+<text x="1220" y="597" font-family="Arial, sans-serif" font-size="26" fill="#BD6519" font-weight="bold" text-anchor="middle">D1  STATUS LED</text>
+<text x="1080" y="737" font-family="Arial, sans-serif" font-size="22" fill="#BD6519" font-weight="normal" text-anchor="middle">Anode (+)</text>
+<text x="1240" y="737" font-family="Arial, sans-serif" font-size="22" fill="#19313D" font-weight="normal" text-anchor="middle">Cathode (-)</text>
+<text x="1100" y="772" font-family="Arial, sans-serif" font-size="21" fill="#5C6D76" font-weight="normal" text-anchor="middle">Long leg = anode; flat side / short leg = cathode</text>
+<text x="558" y="838" font-family="Arial, sans-serif" font-size="27" fill="#7750A1" font-weight="normal" text-anchor="end">GPIO27</text>
+<polyline points="580,830 1030,830" fill="none" stroke="#7750A1" stroke-width="4" stroke-linejoin="round"/>
+<circle cx="1030" cy="830" r="6" fill="white" stroke="#7750A1" stroke-width="3"/>
+<polyline points="1170,830 1395,830" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="1170" cy="830" r="6" fill="white" stroke="#7750A1" stroke-width="3"/>
+<polyline points="1020,810 1180,810" fill="none" stroke="#7750A1" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1100,790 1100,810" fill="none" stroke="#7750A1" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1395,830 1395,845" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1373,845 1417,845" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1381,855 1409,855" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1389,865 1401,865" fill="none" stroke="#19313D" stroke-width="3" stroke-linejoin="round"/>
+<text x="1395" y="896" font-family="Arial, sans-serif" font-size="22" fill="#5C6D76" font-weight="normal" text-anchor="middle">GND</text>
+<text x="1100" y="956" font-family="Arial, sans-serif" font-size="26" fill="#7750A1" font-weight="bold" text-anchor="middle">SW1  VERIFY BUTTON</text>
+<text x="1100" y="995" font-family="Arial, sans-serif" font-size="22" fill="#5C6D76" font-weight="normal" text-anchor="middle">Normally open. Press connects GPIO27 to GND.</text>
+<text x="730" y="883" font-family="Arial, sans-serif" font-size="23" fill="#7750A1" font-weight="bold" text-anchor="middle">INPUT_PULLUP</text>
+<text x="730" y="916" font-family="Arial, sans-serif" font-size="22" fill="#5C6D76" font-weight="normal" text-anchor="middle">Released = HIGH</text>
+<text x="730" y="949" font-family="Arial, sans-serif" font-size="22" fill="#5C6D76" font-weight="normal" text-anchor="middle">Pressed = LOW</text>
+<rect x="250" y="825" width="156" height="40" fill="#DFE8EE" stroke="#19313D" stroke-width="3"/>
+<text x="328" y="853" font-family="Arial, sans-serif" font-size="24" fill="#19313D" font-weight="bold" text-anchor="middle">USB</text>
+<polyline points="328,865 328,925" fill="none" stroke="#19313D" stroke-width="4" stroke-linejoin="round"/>
+<text x="328" y="964" font-family="Arial, sans-serif" font-size="24" fill="#19313D" font-weight="bold" text-anchor="middle">USB power + programming</text>
+<text x="328" y="1000" font-family="Arial, sans-serif" font-size="21" fill="#5C6D76" font-weight="normal" text-anchor="middle">Wi-Fi / MQTT to Windows</text>
+<polyline points="85,1030 1515,1030" fill="none" stroke="#D2DCE2" stroke-width="2" stroke-linejoin="round"/>
+<text x="85" y="1070" font-family="Arial, sans-serif" font-size="21" fill="#5C6D76" font-weight="normal" text-anchor="start">GPIO numbers, not header positions. Check actual LCD labels before wiring.</text>
+<text x="1515" y="1070" font-family="Arial, sans-serif" font-size="20" fill="#5C6D76" font-weight="normal" text-anchor="end">Mockup / no motors connected</text>
+</svg>
