@@ -5,7 +5,7 @@
 // the simulation and exchanges bounded copies through queues.
 namespace Network {
 struct Request {
-  enum class Action : uint8_t { Call, Select };
+  enum class Action : uint8_t { Call, Select, Enter, Here };
   Action action;
   int floor;  // Select only.
   char id[65];

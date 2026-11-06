@@ -137,7 +137,7 @@ bool onVerificationPressed(uint32_t now, const char* source = "button", int hall
   return true;
 }
 
-bool onFloorSelected(uint32_t now, int floor) {
+bool onFloorSelected(uint32_t now, int floor, const char* source = "dashboard") {
   if (!simulation.selectFloor(now, floor)) {
     Serial.printf("Floor %d rejected.\n", floor);
     return false;
@@ -145,8 +145,116 @@ bool onFloorSelected(uint32_t now, int floor) {
   displayDirty = true;
   logSimulation();
   Network::publishState(simulation);
-  Network::event("selected", "dashboard");
+  Network::event("selected", source);
   return true;
+}
+
+// Passenger walks into the car that is waiting with doors open.
+bool onEnterCar(uint32_t now, const char* source) {
+  if (!simulation.enter(now)) {
+    Serial.println("No open car to enter.");
+    return false;
+  }
+  displayDirty = true;
+  logSimulation();
+  Network::publishState(simulation);
+  Network::event("boarded", source);
+  return true;
+}
+
+// Passenger tells the system which floor they stand on (idle only).
+bool onHereSet(int floor) {
+  if (!simulation.setHall(floor)) {
+    return false;
+  }
+  displayDirty = true;
+  logSimulation();
+  Network::publishState(simulation);
+  return true;
+}
+
+// The one physical button means different things as the journey progresses:
+// idle/arrived = call a lift from the chosen floor, doors open = walk in.
+void onButtonPressed(uint32_t now) {
+  const auto phase = simulation.phase();
+  if (phase == ElevatorSimulation::Phase::Boarding && !simulation.boarded()) {
+    onEnterCar(now, "button");
+  } else {
+    onVerificationPressed(now);
+  }
+}
+
+// ---- 4x4 keypad (floor entry inside the lift) -------------------------------
+// Digits build a floor number, '*' clears it, '#' confirms.
+const char kKeymap[4][4] = {{'1', '2', '3', 'A'}, {'4', '5', '6', 'B'},
+                            {'7', '8', '9', 'C'}, {'*', '0', '#', 'D'}};
+char lastRawKey = 0;
+char stableKey = 0;
+uint32_t rawKeyChangedAt = 0;
+int keypadEntry = 0;
+
+char scanKeypad() {
+  char found = 0;
+  for (uint8_t r = 0; r < 4; ++r) {
+    for (uint8_t i = 0; i < 4; ++i) {
+      digitalWrite(Config::kKeypadRows[i], i == r ? LOW : HIGH);
+    }
+    delayMicroseconds(10);
+    for (uint8_t c = 0; c < 4; ++c) {
+      if (digitalRead(Config::kKeypadCols[c]) == LOW) {
+        found = kKeymap[r][c];
+      }
+    }
+  }
+  for (uint8_t i = 0; i < 4; ++i) {
+    digitalWrite(Config::kKeypadRows[i], HIGH);
+  }
+  return found;
+}
+
+void onKeyPressed(uint32_t now, char key) {
+  const bool typing = simulation.phase() == ElevatorSimulation::Phase::Boarding &&
+                      simulation.boarded() && simulation.destination() == 0;
+  if (!typing) {
+    Serial.printf("Key '%c' ignored (walk in first, then key a floor).\n", key);
+    return;
+  }
+  keypadEntry = simulation.entry();  // Stay in sync (the sim clears it per journey).
+  if (key >= '0' && key <= '9') {
+    const int next = keypadEntry * 10 + (key - '0');
+    keypadEntry = next > Config::kMaxFloor ? (key - '0') : next;  // Restart on overflow.
+  } else if (key == '*') {
+    keypadEntry = 0;
+  } else if (key == '#') {
+    const int floor = keypadEntry;
+    keypadEntry = 0;
+    simulation.setEntry(0);
+    if (!onFloorSelected(now, floor, "keypad")) {
+      displayDirty = true;  // Rejected: show the prompt again.
+    }
+    return;
+  } else {
+    return;
+  }
+  simulation.setEntry(keypadEntry);
+  displayDirty = true;
+  logSimulation();
+  Network::publishState(simulation);
+}
+
+void updateKeypad(uint32_t now) {
+  const char raw = scanKeypad();
+  if (raw != lastRawKey) {
+    lastRawKey = raw;
+    rawKeyChangedAt = now;
+  }
+  if (raw != stableKey &&
+      static_cast<uint32_t>(now - rawKeyChangedAt) >= Config::kDebounceMs) {
+    stableKey = raw;
+    if (stableKey != 0) {
+      onKeyPressed(now, stableKey);
+    }
+  }
 }
 
 void updateButton(uint32_t now) {
@@ -161,7 +269,7 @@ void updateButton(uint32_t now) {
       static_cast<uint32_t>(now - rawButtonChangedAt) >= Config::kDebounceMs) {
     stableButton = rawButton;
     if (stableButton == LOW) {
-      onVerificationPressed(now);
+      onButtonPressed(now);
     }
   }
 }
@@ -246,6 +354,11 @@ void setup() {
   pinMode(Config::kStatusLed, OUTPUT);
   digitalWrite(Config::kStatusLed, LOW);
   pinMode(Config::kVerifyButton, INPUT_PULLUP);
+  for (uint8_t i = 0; i < 4; ++i) {
+    pinMode(Config::kKeypadRows[i], OUTPUT);
+    digitalWrite(Config::kKeypadRows[i], HIGH);
+    pinMode(Config::kKeypadCols[i], INPUT_PULLUP);
+  }
 
   delay(250);  // Allow the LCD supply to settle once at startup.
   initializeDisplay();
@@ -258,7 +371,7 @@ void setup() {
   lastRawButton = digitalRead(Config::kVerifyButton);
   stableButton = lastRawButton;
   rawButtonChangedAt = millis();
-  Serial.println("Four elevators ready. Button = hall call at the last chosen floor (default 1); pick the floor in the dashboard.");
+  Serial.println("Four elevators ready. Set your floor on the dashboard; button = call lift, then button = walk in, keypad = floor + #.");
   simulation.seed(esp_random());  // Different background traffic every boot.
   Network::begin();
   Network::publishState(simulation);
@@ -269,12 +382,17 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
   updateButton(now);
+  updateKeypad(now);
   Network::Request request;
   if (Network::receive(request)) {
     const char* result = Network::validate(request, now);
     if (!result) {
       if (request.action == Network::Request::Action::Select) {
         result = onFloorSelected(now, request.floor) ? "accepted" : "busy";
+      } else if (request.action == Network::Request::Action::Enter) {
+        result = onEnterCar(now, "dashboard") ? "accepted" : "busy";
+      } else if (request.action == Network::Request::Action::Here) {
+        result = onHereSet(request.floor) ? "accepted" : "busy";
       } else {
         result = onVerificationPressed(now, "dashboard", request.floor) ? "accepted" : "busy";
       }

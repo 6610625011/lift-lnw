@@ -14,8 +14,9 @@
 //
 // The user's journey: hall call at hall_ -> the dispatcher picks the car with
 // the SHORTEST ESTIMATED TIME to reach the hall (a busy car must first finish
-// its current trip) -> that car arrives, doors open and wait for a floor
-// choice (selectFloor) -> doors close -> ride -> arrive.
+// its current trip) -> that car arrives and opens its doors -> the passenger
+// walks in (enter) -> keys a floor (setEntry, then selectFloor) -> doors close
+// -> ride -> arrive.
 class ElevatorSimulation {
  public:
   enum class Phase { Idle, Coming, Boarding, Riding, Arrived };
@@ -70,16 +71,47 @@ class ElevatorSimulation {
     selected_ = static_cast<int>(best);
     destination_ = 0;
     ++cars_[best].assignments;
-    enter(cars_[best].mode == Mode::Free && cars_[best].floor == hall_
+    go(cars_[best].mode == Mode::Free && cars_[best].floor == hall_
               ? Phase::Boarding
               : Phase::Coming,
           now);
     return true;
   }
 
-  // Floor chosen inside the car. Only valid while the car waits at the hall.
+  // Where the passenger stands, set before calling (web page or keypad).
+  bool setHall(int floor) {
+    if ((phase_ != Phase::Idle && phase_ != Phase::Arrived) ||
+        floor < Config::kMinFloor || floor > Config::kMaxFloor) {
+      return false;
+    }
+    hall_ = floor;
+    return true;
+  }
+
+  // Passenger walks into the waiting car (doors are open).
+  bool enter(uint32_t now) {
+    if (phase_ != Phase::Boarding || boarded_) {
+      return false;
+    }
+    boarded_ = true;
+    entry_ = 0;
+    phaseStartedAt_ = now;  // The floor-choice timeout starts now.
+    return true;
+  }
+
+  // Digits typed so far on the keypad (0 = nothing). Not yet confirmed.
+  bool setEntry(int value) {
+    if (phase_ != Phase::Boarding || !boarded_ || destination_ != 0 ||
+        value < 0 || value > 99) {
+      return false;
+    }
+    entry_ = value;
+    return true;
+  }
+
+  // Floor chosen inside the car (keypad '#' or web pad).
   bool selectFloor(uint32_t now, int floor) {
-    if (phase_ != Phase::Boarding || destination_ != 0) {
+    if (phase_ != Phase::Boarding || !boarded_ || destination_ != 0) {
       return false;
     }
     if (floor < Config::kMinFloor || floor > Config::kMaxFloor ||
@@ -114,7 +146,7 @@ class ElevatorSimulation {
           break;  // Still finishing another passenger's trip.
         }
         if (car.floor == hall_) {
-          enter(Phase::Boarding, now);
+          go(Phase::Boarding, now);
           changed = true;
         } else if (static_cast<uint32_t>(now - lastStepAt_) >=
                    Config::kTravelPerFloorMs) {
@@ -122,7 +154,7 @@ class ElevatorSimulation {
           lastStepAt_ = now;
           changed = true;
           if (car.floor == hall_) {
-            enter(Phase::Boarding, now);
+            go(Phase::Boarding, now);
           }
         }
         break;
@@ -137,7 +169,7 @@ class ElevatorSimulation {
         lastStepAt_ = now;
         changed = true;
         if (car.floor == destination_) {
-          enter(Phase::Arrived, now);
+          go(Phase::Arrived, now);
         }
         break;
       }
@@ -145,13 +177,13 @@ class ElevatorSimulation {
         if (destination_ != 0) {
           if (static_cast<uint32_t>(now - selectedAt_) >=
               Config::kDoorCloseMs) {
-            enter(Phase::Riding, now);
+            go(Phase::Riding, now);
             changed = true;
           }
         } else if (static_cast<uint32_t>(now - phaseStartedAt_) >=
                    Config::kSelectTimeoutMs) {
           selected_ = -1;  // Nobody chose a floor: cancel and free the system.
-          enter(Phase::Idle, now);
+          go(Phase::Idle, now);
           changed = true;
         }
         break;
@@ -159,7 +191,7 @@ class ElevatorSimulation {
         if (static_cast<uint32_t>(now - phaseStartedAt_) >=
             Config::kArrivalDisplayMs) {
           selected_ = -1;
-          enter(Phase::Idle, now);
+          go(Phase::Idle, now);
           changed = true;
         }
         break;
@@ -185,12 +217,19 @@ class ElevatorSimulation {
                  hall_);
         break;
       case Phase::Boarding:
-        if (destination_ == 0) {
+        if (!boarded_) {
           snprintf(top, sizeof(top), "LIFT %c OPEN", car.id);
-          snprintf(bottom, sizeof(bottom), "SELECT FLOOR");
-        } else {
+          snprintf(bottom, sizeof(bottom), "PRESS TO ENTER");
+        } else if (destination_ != 0) {
           snprintf(top, sizeof(top), "LIFT %c TO F%02d", car.id, destination_);
           snprintf(bottom, sizeof(bottom), "DOORS CLOSING");
+        } else {
+          snprintf(top, sizeof(top), "INSIDE LIFT %c", car.id);
+          if (entry_ > 0) {
+            snprintf(bottom, sizeof(bottom), "FLOOR:%d #=OK", entry_);
+          } else {
+            snprintf(bottom, sizeof(bottom), "KEY FLOOR + #");
+          }
         }
         break;
       case Phase::Riding:
@@ -218,6 +257,8 @@ class ElevatorSimulation {
   // 0 until the passenger has chosen a floor.
   int destination() const { return destination_; }
   int hallFloor() const { return hall_; }
+  bool boarded() const { return boarded_; }
+  int entry() const { return entry_; }
   // Estimated seconds each car needed to reach the hall at the moment of the
   // call; this is what the dispatcher compared.
   int etaSeconds(size_t index) const { return etaSeconds_[index]; }
@@ -225,10 +266,15 @@ class ElevatorSimulation {
  private:
   static int distance(int a, int b) { return a > b ? a - b : b - a; }
 
-  void enter(Phase phase, uint32_t now) {
+  void go(Phase phase, uint32_t now) {
     phase_ = phase;
     if (phase == Phase::Idle) {
       destination_ = 0;
+    }
+    if (phase == Phase::Idle || phase == Phase::Coming ||
+        phase == Phase::Boarding) {
+      boarded_ = false;
+      entry_ = 0;
     }
     phaseStartedAt_ = now;
     lastStepAt_ = now;
@@ -332,6 +378,8 @@ class ElevatorSimulation {
   int selected_ = -1;
   int destination_ = 0;
   int hall_ = Config::kHomeFloor;
+  bool boarded_ = false;
+  int entry_ = 0;
   uint32_t selectedAt_ = 0;
   uint32_t phaseStartedAt_ = 0;
   uint32_t lastStepAt_ = 0;

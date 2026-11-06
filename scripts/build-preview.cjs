@@ -28,7 +28,7 @@ const component = (function(){ ${script} })();
 let S = SimCore.createSim();
 let t = 0;                       // simulated clock in ms
 const events = [];
-const labels = { coming:'มอบหมายลิฟต์แล้ว · ให้ไปที่ลิฟต์ที่ได้รับมอบหมาย', boarding:'ลิฟต์ถึงแล้ว รอเลือกชั้น', riding:'เลือกชั้นแล้ว · กำลังเดินทาง', arrived:'ถึงปลายทางแล้ว', idle:'พร้อมรับคำขอใหม่' };
+const labels = { coming:'มอบหมายลิฟต์แล้ว · ให้ไปที่ลิฟต์ที่ได้รับมอบหมาย', boarding:'ลิฟต์ถึงแล้ว รอเดินเข้า / เลือกชั้น', riding:'เลือกชั้นแล้ว · กำลังเดินทาง', arrived:'ถึงปลายทางแล้ว', idle:'พร้อมรับคำขอใหม่' };
 let lastPhase = 'idle';
 const app = Vue.createApp({
   ...component,
@@ -36,7 +36,10 @@ const app = Vue.createApp({
   data() { return { ...component.data(), msg: { payload: {} } }; },
   methods: { ...component.methods,
     send(m) {
-      if (m && m.topic === 'select') S.selectFloor(t, m.payload); else S.request(t, Number(m.payload) || 0);
+      if (m && m.topic === 'select') S.selectFloor(t, m.payload);
+      else if (m && m.topic === 'enter') S.enter(t);
+      else if (m && m.topic === 'here') S.setHall(Number(m.payload));
+      else S.request(t, Number(m.payload) || 0);
       this.sync();
     },
     sync() {

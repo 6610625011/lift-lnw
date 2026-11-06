@@ -7,6 +7,10 @@ constexpr uint8_t kDisplaySda = 21;
 constexpr uint8_t kDisplayScl = 22;
 constexpr uint8_t kStatusLed = 25;
 constexpr uint8_t kVerifyButton = 27;
+// 4x4 membrane keypad (optional; nothing happens if it is not wired).
+// Rows are driven LOW one at a time, columns are INPUT_PULLUP.
+constexpr uint8_t kKeypadRows[4] = {13, 14, 16, 17};
+constexpr uint8_t kKeypadCols[4] = {18, 19, 32, 33};
 
 constexpr uint8_t kDisplayColumns = 16;
 constexpr uint8_t kDisplayRows = 2;

@@ -41,25 +41,56 @@ const previous = []; // bounded 32-entry dedupe, like the firmware
 client.on('connect', () => {
   console.log(`fake ESP32 online, boot_id ${boot}, speed x${SPEED}`);
   client.subscribe(T + 'request', { qos: 1 });
+  client.subscribe(T + 'hw', { qos: 0 });
   client.publish(T + 'availability', 'online', { retain: true });
   publishState();
 });
 client.on('error', (e) => console.error('MQTT error:', e.message));
+// What the physical button does depends on the journey phase (same as src/main.cpp).
+function pressButton() {
+  const label = sim.phase === 'boarding' && !sim.boarded ? 'enter' : 'call';
+  const ok = label === 'enter' ? S.enter(Date.now()) : S.request(Date.now(), 0);
+  if (ok) { publishState(); event(label === 'enter' ? 'boarded' : 'assigned', 'button'); }
+  return ok;
+}
+// Keypad: digits build a floor, '*' clears, '#' confirms (same as src/main.cpp).
+function pressKey(key) {
+  const typing = sim.phase === 'boarding' && sim.boarded && !sim.dest;
+  if (!typing) return false;
+  if (/^[0-9]$/.test(key)) { const next = sim.entry * 10 + Number(key); S.setEntry(next > 20 ? Number(key) : next); }
+  else if (key === '*') S.setEntry(0);
+  else if (key === '#') {
+    const floor = sim.entry; S.setEntry(0);
+    if (S.selectFloor(Date.now(), floor)) { publishState(); event('selected', 'keypad'); return true; }
+    return false;
+  } else return false;
+  publishState(); return true;
+}
+
 client.on('message', (topic, buf) => {
   let m; try { m = JSON.parse(buf.toString()); } catch { return; }
-  const call = m.action === 'verify' || m.action === 'call', select = m.action === 'select';
-  if (!(call || select) || !m.request_id || m.request_id.length > 64 || typeof m.boot_id !== 'string' || m.boot_id.length !== 16 || !Number.isInteger(m.issued_uptime_ms)) return;
-  if (select && !(Number.isInteger(m.floor) && m.floor >= 1 && m.floor <= 20)) return;
+  if (topic === T + 'hw') {
+    // Simulated hardware input (scripts/sim-hardware.cjs): {"button":true} or {"keys":"16#"}.
+    if (m.button) console.log(`${new Date().toLocaleTimeString()} [hw] button -> ${pressButton() ? 'ok' : 'ignored'}   LCD: ${lcd().join(' / ')}`);
+    if (typeof m.keys === 'string') for (const k of m.keys) console.log(`${new Date().toLocaleTimeString()} [hw] key ${k} -> ${pressKey(k) ? 'ok' : 'ignored'}   LCD: ${lcd().join(' / ')}`);
+    return;
+  }
+  const act = m.action;
+  const call = act === 'verify' || act === 'call', select = act === 'select', enter = act === 'enter', here = act === 'here';
+  if (!(call || select || enter || here) || !m.request_id || m.request_id.length > 64 || typeof m.boot_id !== 'string' || m.boot_id.length !== 16 || !Number.isInteger(m.issued_uptime_ms)) return;
+  if ((select || here) && !(Number.isInteger(m.floor) && m.floor >= 1 && m.floor <= 20)) return;
   let result;
   const dup = previous.find((p) => p.id === m.request_id);
   if (m.boot_id !== boot) result = 'expired';
   else if (dup) result = dup.result;
   else if (uptime() - m.issued_uptime_ms > 5000) result = 'expired';
   else if (select) { result = selectFloor(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('selected', 'dashboard'); } }
+  else if (enter) { result = S.enter(Date.now()) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('boarded', 'dashboard'); } }
+  else if (here) { result = S.setHall(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') publishState(); }
   else { const from = Number.isInteger(m.floor) ? m.floor : 0; result = request(from) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('assigned', 'dashboard'); } }
   if (!dup) { previous.push({ id: m.request_id, result }); if (previous.length > 32) previous.shift(); }
   event(result, 'dashboard', m.request_id);
-  console.log(`${new Date().toLocaleTimeString()} ${m.action}${m.floor ? ' ' + m.floor : ''} -> ${result}   LCD: ${lcd().join(' / ')}`);
+  console.log(`${new Date().toLocaleTimeString()} ${act}${m.floor ? ' ' + m.floor : ''} -> ${result}   LCD: ${lcd().join(' / ')}`);
 });
 let lastPub = 0, lastPhase = sim.phase;
 setInterval(() => {

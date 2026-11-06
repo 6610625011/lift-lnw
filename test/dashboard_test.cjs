@@ -9,6 +9,12 @@ assert.equal(monitor({topic:'elevator/v1/mockup/state',retain:true,payload:JSON.
 assert.equal(request({topic:'verify'},flow),null,'offline request blocked');
 assert.equal(monitor({topic:'elevator/v1/mockup/state',retain:false,payload:JSON.stringify(state)},flow).payload.online,true);
 
+// Telling the board where I stand is allowed when idle and is not tracked as pending.
+const here=JSON.parse(request({topic:'here',payload:7},flow).payload);
+assert.equal(here.action,'here'); assert.equal(here.floor,7);
+assert.equal(request({topic:'here',payload:21},flow),null,'bad standing floor rejected');
+assert.equal(flow.get('model').pending,null,'here must not block the call button');
+
 // Hall call.
 const command=JSON.parse(request({topic:'verify',payload:7},flow).payload);
 assert.equal(command.floor,7,'hall call carries the chosen standing floor');
@@ -22,9 +28,18 @@ state.phase='coming';state.assigned='C';send(state);
 assert.equal(request({topic:'verify'},flow),null,'active journey blocks calls');
 assert.equal(request({topic:'select',payload:16},flow),null,'cannot choose floor before the car arrives');
 
-// Car open at the hall: choose a floor.
-state.phase='boarding';state.floors.C=1;send(state);
+// Car open at the hall: the passenger must walk in before keying a floor.
+state.phase='boarding';state.floors.C=1;state.boarded=false;send(state);
 assert.equal(request({topic:'verify'},flow),null,'boarding blocks hall calls');
+assert.equal(request({topic:'select',payload:16},flow),null,'cannot choose a floor before walking in');
+assert.equal(request({topic:'here',payload:5},flow),null,'cannot change standing floor during a journey');
+const enter=JSON.parse(request({topic:'enter'},flow).payload);
+assert.equal(enter.action,'enter'); assert.equal(enter.boot_id,state.boot_id);
+assert.equal(request({topic:'enter'},flow),null,'pending enter blocks a second tap');
+result=monitor({topic:'elevator/v1/mockup/events',payload:JSON.stringify({boot_id:state.boot_id,type:'accepted',source:'dashboard',request_id:enter.request_id})},flow).payload;
+assert.equal(result.pending,null);
+state.boarded=true;send(state);
+assert.equal(request({topic:'enter'},flow),null,'cannot walk in twice');
 assert.equal(request({topic:'select',payload:0},flow),null,'floor 0 rejected');
 assert.equal(request({topic:'select',payload:21},flow),null,'floor 21 rejected');
 assert.equal(request({topic:'select',payload:1.5},flow),null,'non-integer rejected');
@@ -48,4 +63,4 @@ assert.equal(monitor({topic:'elevator/v1/mockup/state',payload:{...state,floors:
 assert.equal(monitor({topic:'elevator/v1/mockup/state',payload:{...state,destination:21}},flow),null,'invalid destination rejected');
 send(state);
 assert.equal(monitor({topic:'broker-status',status:{text:'disconnected'}},flow).payload.online,false,'broker disconnect detected');
-console.log('PASS: retained/stale/offline handling, state validation, hall call + in-car floor selection guards, pending/busy request guards, acknowledgements.');
+console.log('PASS: retained/stale/offline handling, state validation, standing floor, hall call, walk-in and in-car floor selection guards, pending/busy request guards, acknowledgements.');

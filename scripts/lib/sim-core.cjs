@@ -14,10 +14,10 @@ function createSim(options = {}) {
   const sim = {
     ambient: options.ambient !== false,
     cars: C.initial.map((floor, i) => ({ id: 'ABCD'[i], floor, assignments: 0, mode: 'free', target: 0, stepAt: 0, dwellAt: 0 })),
-    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home,
+    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home, boarded: false, entry: 0,
     selectedAt: 0, phaseAt: 0, lastStepAt: 0, lastSpawn: 0,
   };
-  const enter = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; sim.phaseAt = now; sim.lastStepAt = now; };
+  const go = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; if (p === 'idle' || p === 'coming' || p === 'boarding') { sim.boarded = false; sim.entry = 0; } sim.phaseAt = now; sim.lastStepAt = now; };
 
   function etaMs(i, floor, now) {
     const c = sim.cars[i];
@@ -40,11 +40,23 @@ function createSim(options = {}) {
     }
     sim.sel = best; sim.dest = 0; sim.cars[best].assignments++;
     const car = sim.cars[best];
-    enter(car.mode === 'free' && car.floor === sim.hall ? 'boarding' : 'coming', now);
+    go(car.mode === 'free' && car.floor === sim.hall ? 'boarding' : 'coming', now);
     return true;
   }
+  function setHall(floor) {
+    if ((sim.phase !== 'idle' && sim.phase !== 'arrived') || !Number.isInteger(floor) || floor < C.minFloor || floor > C.maxFloor) return false;
+    sim.hall = floor; return true;
+  }
+  function enter(now) {
+    if (sim.phase !== 'boarding' || sim.boarded) return false;
+    sim.boarded = true; sim.entry = 0; sim.phaseAt = now; return true;
+  }
+  function setEntry(value) {
+    if (sim.phase !== 'boarding' || !sim.boarded || sim.dest || !Number.isInteger(value) || value < 0 || value > 99) return false;
+    sim.entry = value; return true;
+  }
   function selectFloor(now, floor) {
-    if (sim.phase !== 'boarding' || sim.dest) return false;
+    if (sim.phase !== 'boarding' || !sim.boarded || sim.dest) return false;
     if (!Number.isInteger(floor) || floor < C.minFloor || floor > C.maxFloor || floor === sim.cars[sim.sel].floor) return false;
     sim.dest = floor; sim.selectedAt = now; return true;
   }
@@ -76,18 +88,18 @@ function createSim(options = {}) {
     if (sim.ambient) changed = maybeStartBackgroundTrip(now) || changed;
     const car = sim.sel >= 0 ? sim.cars[sim.sel] : null;
     if (sim.phase === 'coming' && car.mode === 'free') {
-      if (car.floor === sim.hall) { enter('boarding', now); changed = true; }
+      if (car.floor === sim.hall) { go('boarding', now); changed = true; }
       else if (now - sim.lastStepAt >= C.stepMs) {
         car.floor += sim.hall > car.floor ? 1 : -1; sim.lastStepAt = now; changed = true;
-        if (car.floor === sim.hall) enter('boarding', now);
+        if (car.floor === sim.hall) go('boarding', now);
       }
     } else if (sim.phase === 'riding' && now - sim.lastStepAt >= C.stepMs) {
       car.floor += sim.dest > car.floor ? 1 : -1; sim.lastStepAt = now; changed = true;
-      if (car.floor === sim.dest) enter('arrived', now);
+      if (car.floor === sim.dest) go('arrived', now);
     } else if (sim.phase === 'boarding') {
-      if (sim.dest) { if (now - sim.selectedAt >= C.doorMs) { enter('riding', now); changed = true; } }
-      else if (now - sim.phaseAt >= C.selectTimeoutMs) { sim.sel = -1; enter('idle', now); changed = true; }
-    } else if (sim.phase === 'arrived' && now - sim.phaseAt >= C.arrivalMs) { sim.sel = -1; enter('idle', now); changed = true; }
+      if (sim.dest) { if (now - sim.selectedAt >= C.doorMs) { go('riding', now); changed = true; } }
+      else if (now - sim.phaseAt >= C.selectTimeoutMs) { sim.sel = -1; go('idle', now); changed = true; }
+    } else if (sim.phase === 'arrived' && now - sim.phaseAt >= C.arrivalMs) { sim.sel = -1; go('idle', now); changed = true; }
     return changed;
   }
   function lcd() {
@@ -95,7 +107,10 @@ function createSim(options = {}) {
     switch (sim.phase) {
       case 'idle': return [`F${pad(sim.hall)} PRESS VERIFY`, `A${pad(f[0])} B${pad(f[1])} C${pad(f[2])} D${pad(f[3])}`];
       case 'coming': return [`GO TO LIFT ${c}`, `NOW:${pad(n)} HALL:${pad(sim.hall)}`];
-      case 'boarding': return sim.dest ? [`LIFT ${c} TO F${pad(sim.dest)}`, 'DOORS CLOSING'] : [`LIFT ${c} OPEN`, 'SELECT FLOOR'];
+      case 'boarding':
+        if (!sim.boarded) return [`LIFT ${c} OPEN`, 'PRESS TO ENTER'];
+        if (sim.dest) return [`LIFT ${c} TO F${pad(sim.dest)}`, 'DOORS CLOSING'];
+        return [`INSIDE LIFT ${c}`, sim.entry > 0 ? `FLOOR:${sim.entry} #=OK` : 'KEY FLOOR + #'];
       case 'riding': return [`LIFT ${c} MOVING ${sim.dest > n ? 'UP' : 'DN'}`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];
       default: return [`LIFT ${c} ARRIVED`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];
     }
@@ -104,10 +119,10 @@ function createSim(options = {}) {
   function stateBody() {
     const floors = {}, targets = {}, eta_s = {};
     sim.cars.forEach((c, i) => { floors[c.id] = c.floor; targets[c.id] = c.mode === 'free' ? 0 : c.target; if (sim.phase !== 'idle') eta_s[c.id] = sim.eta[i]; });
-    const body = { phase: sim.phase, assigned: sim.sel < 0 ? '-' : sim.cars[sim.sel].id, hall_floor: sim.hall, destination: sim.dest, floors, targets, lcd: lcd() };
+    const body = { phase: sim.phase, assigned: sim.sel < 0 ? '-' : sim.cars[sim.sel].id, hall_floor: sim.hall, destination: sim.dest, boarded: sim.boarded, entry: sim.entry, floors, targets, lcd: lcd() };
     if (sim.phase !== 'idle') body.eta_s = eta_s;
     return body;
   }
-  return { sim, request, selectFloor, tick, lcd, stateBody };
+  return { sim, request, setHall, enter, setEntry, selectFloor, tick, lcd, stateBody };
 }
 if (typeof module !== 'undefined') module.exports = { createSim };

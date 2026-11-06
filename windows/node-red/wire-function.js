@@ -3,8 +3,8 @@
 const base = 'elevator/v1/mockup/';
 let wire = flow.get('wire') || {counts: {}, last: {}, lastRaw: {}, log: [], since: Date.now()};
 const now = Date.now();
-const phaseTh = {idle: 'ว่าง', coming: 'ลิฟต์กำลังมารับ', boarding: 'ประตูเปิด รอเลือกชั้น', riding: 'กำลังเดินทาง', arrived: 'ถึงปลายทาง'};
-const eventTh = {assigned: 'มอบหมายลิฟต์แล้ว', pickup: 'ลิฟต์ถึงจุดรับ', selected: 'เลือกชั้นแล้ว', riding: 'เริ่มเดินทาง', arrival: 'ถึงปลายทาง', ready: 'พร้อมรับงานใหม่', coming: 'ลิฟต์กำลังมา', accepted: 'บอร์ดตอบรับคำสั่ง', busy: 'บอร์ดปฏิเสธ (ไม่ว่าง)', expired: 'คำสั่งหมดอายุ'};
+const phaseTh = {idle: 'ว่าง', coming: 'ลิฟต์กำลังมารับ', boarding: 'ประตูเปิด / อยู่ในลิฟต์', riding: 'กำลังเดินทาง', arrived: 'ถึงปลายทาง'};
+const eventTh = {assigned: 'มอบหมายลิฟต์แล้ว', pickup: 'ลิฟต์ถึงจุดรับ (รอเดินเข้า)', boarded: 'ผู้โดยสารเดินเข้าลิฟต์แล้ว', selected: 'เลือกชั้นแล้ว', riding: 'เริ่มเดินทาง', arrival: 'ถึงปลายทาง', ready: 'พร้อมรับงานใหม่', coming: 'ลิฟต์กำลังมา', accepted: 'บอร์ดตอบรับคำสั่ง', busy: 'บอร์ดปฏิเสธ (ไม่ว่าง)', expired: 'คำสั่งหมดอายุ'};
 
 if (typeof msg.topic === 'string' && msg.topic.startsWith(base) && !(msg.retain && msg.topic !== base + 'availability')) {
     const name = msg.topic.slice(base.length);
@@ -19,9 +19,12 @@ if (typeof msg.topic === 'string' && msg.topic.startsWith(base) && !(msg.retain 
         text = 'เหตุการณ์: ' + (eventTh[obj.type] || obj.type);
     } else if (name === 'availability') {
         text = 'ESP32 ' + raw;
+    } else if (name === 'hw') {
+        dir = 'down';
+        text = 'ฮาร์ดแวร์จำลอง (ตัวจำลองเท่านั้น): ' + raw;
     } else if (name === 'request' && obj) {
         dir = 'down';
-        text = obj.action === 'select' ? 'คำสั่งจากแดชบอร์ด: เลือกชั้น ' + obj.floor : 'คำสั่งจากแดชบอร์ด: เรียกลิฟต์' + (obj.floor ? ' จากชั้น ' + obj.floor : '');
+        text = obj.action === 'select' ? 'คำสั่งจากแดชบอร์ด: เลือกชั้น ' + obj.floor : obj.action === 'enter' ? 'คำสั่งจากแดชบอร์ด: เดินเข้าลิฟต์' : obj.action === 'here' ? 'คำสั่งจากแดชบอร์ด: ฉันอยู่ชั้น ' + obj.floor : 'คำสั่งจากแดชบอร์ด: เรียกลิฟต์' + (obj.floor ? ' จากชั้น ' + obj.floor : '');
     }
     wire.counts[name] = (wire.counts[name] || 0) + 1;
     wire.last[name] = now;

@@ -34,12 +34,16 @@ void callback(char*, byte* payload, unsigned int length) {
   const char* action = doc["action"] | "";
   const bool call = !strcmp(action, "verify") || !strcmp(action, "call");
   const bool select = !strcmp(action, "select");
-  if ((!call && !select) || !*id || strlen(id) > 64 ||
+  const bool enter = !strcmp(action, "enter");
+  const bool here = !strcmp(action, "here");
+  if ((!call && !select && !enter && !here) || !*id || strlen(id) > 64 ||
       strlen(bootId) != 16 || !doc["issued_uptime_ms"].is<uint32_t>()) return;
-  if (select && (!doc["floor"].is<int>() || doc["floor"].as<int>() < Config::kMinFloor ||
+  if ((select || here) && (!doc["floor"].is<int>() || doc["floor"].as<int>() < Config::kMinFloor ||
                  doc["floor"].as<int>() > Config::kMaxFloor)) return;
   Request request{};
-  request.action = select ? Request::Action::Select : Request::Action::Call;
+  request.action = select ? Request::Action::Select
+                 : enter ? Request::Action::Enter
+                 : here ? Request::Action::Here : Request::Action::Call;
   request.floor = doc["floor"].is<int>() ? doc["floor"].as<int>() : 0;
   if (call && request.floor != 0 &&
       (request.floor < Config::kMinFloor || request.floor > Config::kMaxFloor)) return;
@@ -151,6 +155,8 @@ void publishState(const ElevatorSimulation& sim) {
   doc["assigned"] = assigned;
   doc["hall_floor"] = sim.hallFloor();
   doc["destination"] = sim.destination();  // 0 = not chosen yet.
+  doc["boarded"] = sim.boarded();          // Passenger is inside the car.
+  doc["entry"] = sim.entry();              // Keypad digits typed so far.
   for (size_t i=0; i<4; ++i) {
     char id[2] = {sim.car(i).id, 0};
     doc["floors"][id] = sim.car(i).floor;

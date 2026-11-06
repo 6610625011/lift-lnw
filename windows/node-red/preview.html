@@ -7,6 +7,7 @@
 .floorpad{background:#fff;border:1px solid #dce5eb;border-radius:14px;padding:16px 22px 20px;margin-bottom:22px}.floorpad h2{font-size:16px;margin:0 0 12px}.floorpad h2 small{font-weight:400;color:#647786;margin-left:8px;font-size:12px}.pad{display:grid;grid-template-columns:repeat(10,1fr);gap:8px}.pad button{padding:12px 0;border-radius:8px;border:1px solid #b8ccd6;background:#fff;font-weight:700;font-size:15px;cursor:pointer;color:#126c82}.pad button:hover:not(:disabled){background:#e8f6f9}.pad button:disabled{background:#eef2f4;color:#a2b2bc;border-color:#e0e8ec;cursor:default}.pad button.chosen{background:#126c82;color:#fff;border-color:#126c82}@media(max-width:600px){.pad{grid-template-columns:repeat(5,1fr)}}
 .here{display:flex;flex-direction:column}.here select{font:inherit;font-size:16px;font-weight:700;padding:9px 10px;border-radius:8px;border:1px solid #b8ccd6;background:#fff;color:#126c82}.here select:disabled{background:#eef2f4;color:#8195a1}
 .bcar.ambient{background:#4f86a8;box-shadow:0 1px 3px rgba(0,0,0,.25)}.bcar.ambient .carrow{color:#4f86a8}.navlink{font-size:12px;color:#126c82;text-decoration:none;white-space:nowrap;margin-left:auto;margin-right:12px}.navlink:hover{text-decoration:underline}
+.enterbtn{background:#d97706!important;margin-right:10px;animation:liftpulse 1s ease-in-out infinite}
 </style>
 </head><body>
 <div class="sim-bar"><b>PREVIEW — ข้อมูลจำลองในเบราว์เซอร์ ไม่ใช่ข้อมูลจาก ESP32</b>
@@ -31,10 +32,10 @@ function createSim(options = {}) {
   const sim = {
     ambient: options.ambient !== false,
     cars: C.initial.map((floor, i) => ({ id: 'ABCD'[i], floor, assignments: 0, mode: 'free', target: 0, stepAt: 0, dwellAt: 0 })),
-    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home,
+    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home, boarded: false, entry: 0,
     selectedAt: 0, phaseAt: 0, lastStepAt: 0, lastSpawn: 0,
   };
-  const enter = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; sim.phaseAt = now; sim.lastStepAt = now; };
+  const go = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; if (p === 'idle' || p === 'coming' || p === 'boarding') { sim.boarded = false; sim.entry = 0; } sim.phaseAt = now; sim.lastStepAt = now; };
 
   function etaMs(i, floor, now) {
     const c = sim.cars[i];
@@ -57,11 +58,23 @@ function createSim(options = {}) {
     }
     sim.sel = best; sim.dest = 0; sim.cars[best].assignments++;
     const car = sim.cars[best];
-    enter(car.mode === 'free' && car.floor === sim.hall ? 'boarding' : 'coming', now);
+    go(car.mode === 'free' && car.floor === sim.hall ? 'boarding' : 'coming', now);
     return true;
   }
+  function setHall(floor) {
+    if ((sim.phase !== 'idle' && sim.phase !== 'arrived') || !Number.isInteger(floor) || floor < C.minFloor || floor > C.maxFloor) return false;
+    sim.hall = floor; return true;
+  }
+  function enter(now) {
+    if (sim.phase !== 'boarding' || sim.boarded) return false;
+    sim.boarded = true; sim.entry = 0; sim.phaseAt = now; return true;
+  }
+  function setEntry(value) {
+    if (sim.phase !== 'boarding' || !sim.boarded || sim.dest || !Number.isInteger(value) || value < 0 || value > 99) return false;
+    sim.entry = value; return true;
+  }
   function selectFloor(now, floor) {
-    if (sim.phase !== 'boarding' || sim.dest) return false;
+    if (sim.phase !== 'boarding' || !sim.boarded || sim.dest) return false;
     if (!Number.isInteger(floor) || floor < C.minFloor || floor > C.maxFloor || floor === sim.cars[sim.sel].floor) return false;
     sim.dest = floor; sim.selectedAt = now; return true;
   }
@@ -93,18 +106,18 @@ function createSim(options = {}) {
     if (sim.ambient) changed = maybeStartBackgroundTrip(now) || changed;
     const car = sim.sel >= 0 ? sim.cars[sim.sel] : null;
     if (sim.phase === 'coming' && car.mode === 'free') {
-      if (car.floor === sim.hall) { enter('boarding', now); changed = true; }
+      if (car.floor === sim.hall) { go('boarding', now); changed = true; }
       else if (now - sim.lastStepAt >= C.stepMs) {
         car.floor += sim.hall > car.floor ? 1 : -1; sim.lastStepAt = now; changed = true;
-        if (car.floor === sim.hall) enter('boarding', now);
+        if (car.floor === sim.hall) go('boarding', now);
       }
     } else if (sim.phase === 'riding' && now - sim.lastStepAt >= C.stepMs) {
       car.floor += sim.dest > car.floor ? 1 : -1; sim.lastStepAt = now; changed = true;
-      if (car.floor === sim.dest) enter('arrived', now);
+      if (car.floor === sim.dest) go('arrived', now);
     } else if (sim.phase === 'boarding') {
-      if (sim.dest) { if (now - sim.selectedAt >= C.doorMs) { enter('riding', now); changed = true; } }
-      else if (now - sim.phaseAt >= C.selectTimeoutMs) { sim.sel = -1; enter('idle', now); changed = true; }
-    } else if (sim.phase === 'arrived' && now - sim.phaseAt >= C.arrivalMs) { sim.sel = -1; enter('idle', now); changed = true; }
+      if (sim.dest) { if (now - sim.selectedAt >= C.doorMs) { go('riding', now); changed = true; } }
+      else if (now - sim.phaseAt >= C.selectTimeoutMs) { sim.sel = -1; go('idle', now); changed = true; }
+    } else if (sim.phase === 'arrived' && now - sim.phaseAt >= C.arrivalMs) { sim.sel = -1; go('idle', now); changed = true; }
     return changed;
   }
   function lcd() {
@@ -112,7 +125,10 @@ function createSim(options = {}) {
     switch (sim.phase) {
       case 'idle': return [`F${pad(sim.hall)} PRESS VERIFY`, `A${pad(f[0])} B${pad(f[1])} C${pad(f[2])} D${pad(f[3])}`];
       case 'coming': return [`GO TO LIFT ${c}`, `NOW:${pad(n)} HALL:${pad(sim.hall)}`];
-      case 'boarding': return sim.dest ? [`LIFT ${c} TO F${pad(sim.dest)}`, 'DOORS CLOSING'] : [`LIFT ${c} OPEN`, 'SELECT FLOOR'];
+      case 'boarding':
+        if (!sim.boarded) return [`LIFT ${c} OPEN`, 'PRESS TO ENTER'];
+        if (sim.dest) return [`LIFT ${c} TO F${pad(sim.dest)}`, 'DOORS CLOSING'];
+        return [`INSIDE LIFT ${c}`, sim.entry > 0 ? `FLOOR:${sim.entry} #=OK` : 'KEY FLOOR + #'];
       case 'riding': return [`LIFT ${c} MOVING ${sim.dest > n ? 'UP' : 'DN'}`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];
       default: return [`LIFT ${c} ARRIVED`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];
     }
@@ -121,11 +137,11 @@ function createSim(options = {}) {
   function stateBody() {
     const floors = {}, targets = {}, eta_s = {};
     sim.cars.forEach((c, i) => { floors[c.id] = c.floor; targets[c.id] = c.mode === 'free' ? 0 : c.target; if (sim.phase !== 'idle') eta_s[c.id] = sim.eta[i]; });
-    const body = { phase: sim.phase, assigned: sim.sel < 0 ? '-' : sim.cars[sim.sel].id, hall_floor: sim.hall, destination: sim.dest, floors, targets, lcd: lcd() };
+    const body = { phase: sim.phase, assigned: sim.sel < 0 ? '-' : sim.cars[sim.sel].id, hall_floor: sim.hall, destination: sim.dest, boarded: sim.boarded, entry: sim.entry, floors, targets, lcd: lcd() };
     if (sim.phase !== 'idle') body.eta_s = eta_s;
     return body;
   }
-  return { sim, request, selectFloor, tick, lcd, stateBody };
+  return { sim, request, setHall, enter, setEntry, selectFloor, tick, lcd, stateBody };
 }
 if (typeof module !== 'undefined') module.exports = { createSim };
 
@@ -133,6 +149,7 @@ return module.exports; })();
 const component = (function(){ 
 return {
   data() { return { myFloor: 1 }; },
+  watch: { 'msg.payload.state.hall_floor': { immediate: true, handler(v) { if (v && (this.msg?.payload?.state?.phase || 'idle') === 'idle') this.myFloor = v; } } },
   computed: {
     view() { return this.msg?.payload || {}; },
     busyOthers() { return this.ids.some(id => (this.view.state?.targets?.[id]||0)>0); },
@@ -140,7 +157,9 @@ return {
     floorList() { return Array.from({length:20},(_,i)=>20-i); },
     hall() { return this.phase==='idle' ? this.myFloor : (this.view.state?.hall_floor || 1); },
     dest() { return this.view.state?.destination || 0; },
-    canSelect() { return this.view.online && this.phase==='boarding' && !this.dest && !this.view.pending; },
+    canSelect() { return this.view.online && this.phase==='boarding' && !!this.view.state?.boarded && !this.dest && !this.view.pending; },
+    canEnter() { return this.view.online && this.phase==='boarding' && !this.view.state?.boarded && !this.view.pending; },
+    typed() { return this.view.state?.entry || 0; },
     padFloors() { return Array.from({length:20},(_,i)=>i+1); },
     assigned() { const a=this.view.state?.assigned; return a && a!=='-' ? a : null; },
     phase() { return this.view.state?.phase || 'idle'; },
@@ -155,13 +174,15 @@ return {
       const a=this.assigned, f=a?this.floorOf(a):0, n=this.remaining;
       if(this.ambientBusy) return 'ไปที่ลิฟต์ '+a+' · ลิฟต์ส่งผู้โดยสารอื่นถึงชั้น '+this.view.state.targets[a]+' ก่อน แล้วจะมารับคุณที่ชั้น '+this.hall+' (ประเมิน ~'+(this.view.state?.eta_s?.[a]??'?')+' วินาที)';
       if(this.phase==='coming') return 'ไปที่ลิฟต์ '+a+' · กำลัง'+(this.direction<0?'ลงมา':'ขึ้นไป')+'รับที่ชั้น '+this.hall+' · ตอนนี้ชั้น '+f+' · อีก '+n+' ชั้น (~'+n*2+' วินาที)';
-      if(this.phase==='boarding') return this.dest ? 'เลือกชั้น '+this.dest+' แล้ว · ประตูกำลังปิด' : 'ลิฟต์ '+a+' เปิดประตูแล้ว · เข้าไปแล้วกดเลือกชั้นที่ต้องการ';
+      if(this.phase==='boarding') { if(this.dest) return 'เลือกชั้น '+this.dest+' แล้ว · ประตูกำลังปิด';
+      if(!this.view.state?.boarded) return 'ลิฟต์ '+a+' เปิดประตูรออยู่ที่ชั้น '+this.hall+' · กด "เดินเข้าลิฟต์ '+a+'" (หรือกดปุ่มที่บอร์ด ESP32)';
+      return this.typed ? 'คุณอยู่ในลิฟต์ '+a+' · กำลังกดชั้น '+this.typed+' ที่แป้นกด · กด # เพื่อยืนยัน' : 'คุณอยู่ในลิฟต์ '+a+' · กดเลือกชั้นที่แป้นกดบนบอร์ด ESP32 (หรือแผงปุ่มบนหน้าเว็บ)'; }
       if(this.phase==='riding') return 'ลิฟต์ '+a+' กำลังพา'+(this.direction<0?'ลง':'ขึ้น')+'ไปชั้น '+this.dest+' · ตอนนี้ชั้น '+f+' · อีก '+n+' ชั้น (~'+n*2+' วินาที)';
       if(this.phase==='arrived') return 'ลิฟต์ '+a+' ถึงชั้น '+this.dest+' แล้ว';
       return this.busyOthers ? 'ลิฟต์บางตัวกำลังพาผู้โดยสารอื่นอยู่ · เลือกชั้นที่ยืน แล้วกดเรียกลิฟต์ ระบบจะคำนวณว่าตัวไหนถึงเร็วที่สุด' : 'ลิฟต์ทุกตัวว่าง · เลือกชั้นที่ยืน แล้วกดเรียกลิฟต์';
     },
     canRequest() { return this.view.online && ['idle','arrived'].includes(this.view.state?.phase) && !this.view.pending; },
-    phaseLabel() { return {idle:'พร้อมรับงาน',coming:'กำลังมารับ',boarding:'ถึงจุดรับ / รอเลือกชั้น',riding:'กำลังไปชั้นปลายทาง',arrived:'ถึงปลายทางแล้ว'}[this.view.state?.phase] || 'รอข้อมูล'; }
+    phaseLabel() { return {idle:'พร้อมรับงาน',coming:'กำลังมารับ',boarding:'ประตูเปิด / รอเลือกชั้น',riding:'กำลังไปชั้นปลายทาง',arrived:'ถึงปลายทางแล้ว'}[this.view.state?.phase] || 'รอข้อมูล'; }
   },
   methods: {
     floorOf(id) { return this.view.state?.floors?.[id] ?? 1; },
@@ -181,15 +202,18 @@ return {
 let S = SimCore.createSim();
 let t = 0;                       // simulated clock in ms
 const events = [];
-const labels = { coming:'มอบหมายลิฟต์แล้ว · ให้ไปที่ลิฟต์ที่ได้รับมอบหมาย', boarding:'ลิฟต์ถึงแล้ว รอเลือกชั้น', riding:'เลือกชั้นแล้ว · กำลังเดินทาง', arrived:'ถึงปลายทางแล้ว', idle:'พร้อมรับคำขอใหม่' };
+const labels = { coming:'มอบหมายลิฟต์แล้ว · ให้ไปที่ลิฟต์ที่ได้รับมอบหมาย', boarding:'ลิฟต์ถึงแล้ว รอเดินเข้า / เลือกชั้น', riding:'เลือกชั้นแล้ว · กำลังเดินทาง', arrived:'ถึงปลายทางแล้ว', idle:'พร้อมรับคำขอใหม่' };
 let lastPhase = 'idle';
 const app = Vue.createApp({
   ...component,
-  template: "\r\n  <div class=\"elevator-app\">\r\n    <div class=\"lift-heading\"><div><div class=\"eyebrow\">ESP32 · MQTT · NODE-RED</div><h1>ระบบลิฟต์จำลอง</h1><p>ลิฟต์ 4 ตัว · อาคาร 20 ชั้น</p></div><a class=\"navlink\" href=\"/dashboard/dataflow\">ดูการส่งข้อมูลของระบบ →</a><span class=\"connection\" :class=\"{live: view.online}\">{{ view.online ? (view.state?.emulator ? '● เชื่อมต่อแล้ว (ตัวจำลอง ESP32)' : '● เชื่อมต่อ ESP32 แล้ว') : '○ รอการเชื่อมต่อ ESP32' }}</span></div>\r\n    <div class=\"journey\"><div><small>จุดเรียก</small><strong>ชั้น {{ hall }}</strong></div><span>→</span><div><small>ปลายทาง</small><strong>{{ dest ? 'ชั้น '+dest : 'เลือกในลิฟต์' }}</strong></div><div class=\"assignment\"><small>ลิฟต์ที่ได้รับมอบหมาย</small><strong>{{ view.state?.assigned !== '-' ? (view.state?.assigned || '—') : '—' }}</strong></div><label class=\"here\"><small>ตอนนี้คุณอยู่ชั้น</small><select v-model.number=\"myFloor\" :disabled=\"!canRequest\"><option v-for=\"f in padFloors\" :key=\"f\" :value=\"f\">ชั้น {{ f }}</option></select></label><button :disabled=\"!canRequest\" @click=\"send({topic:'verify',payload:myFloor})\">เรียกลิฟต์ (ชั้น {{ myFloor }})</button></div>\r\n    <div class=\"offline-note\" v-if=\"!view.online\">{{ view.state ? 'ขาดการเชื่อมต่อ — แสดงข้อมูลล่าสุดที่ได้รับ' : 'ยังไม่มีข้อมูลจากบอร์ด กรุณาเปิด ESP32 และเชื่อมต่อ Wi-Fi' }}</div>\r\n    <section class=\"building\">\r\n      <div class=\"trip-banner\" :class=\"tripClass\">{{ tripText }}</div>\r\n      <div class=\"bldg-grid\">\r\n        <div class=\"floor-col\"><div class=\"bhead\"></div><div v-for=\"f in floorList\" :key=\"f\" class=\"flabel\" :class=\"{hall:f===hall,dest:f===dest}\">{{ f }}<em v-if=\"f===hall\">จุดเรียก</em><em v-else-if=\"f===dest\">ปลายทาง</em></div></div>\r\n        <div v-for=\"id in ids\" :key=\"id\" class=\"bshaft\" :class=\"{assigned: assigned===id}\">\r\n          <div class=\"bhead\">ลิฟต์ {{ id }}</div>\r\n          <div class=\"bbody\">\r\n            <div v-for=\"f in floorList\" :key=\"f\" class=\"rowline\" :class=\"{hall:f===hall,dest:f===dest}\"></div>\r\n            <div v-if=\"trail(id)\" class=\"trail\" :style=\"trail(id)\"></div>\r\n            <div class=\"bcar\" :class=\"carClass(id)\" :style=\"{bottom:(floorOf(id)-1)*24+2+'px'}\"><span class=\"cid\">{{ id }}</span><span class=\"cfl\">{{ floorOf(id) }}</span><span class=\"carrow\">{{ arrow(id) }}</span></div>\r\n          </div>\r\n        </div>\r\n      </div>\r\n    </section>\r\n    <section class=\"floorpad\" :class=\"{disabled:!canSelect}\">\r\n      <h2>แผงปุ่มในลิฟต์ {{ assigned || '' }} <small>{{ canSelect ? 'กดเลือกชั้นที่ต้องการไป' : (dest ? 'เลือกชั้น '+dest+' แล้ว' : 'ปุ่มจะใช้ได้เมื่อลิฟต์มาถึงและเปิดประตู') }}</small></h2>\r\n      <div class=\"pad\"><button v-for=\"f in padFloors\" :key=\"f\" :class=\"{chosen:f===dest}\" :disabled=\"!canSelect || f===floorOf(assigned)\" @click=\"send({topic:'select',payload:f})\">{{ f }}</button></div>\r\n    </section>\r\n    <div class=\"lift-cards\">\r\n      <article v-for=\"id in ['A','B','C','D']\" :key=\"id\" :class=\"['lift-card',{assigned: view.state?.assigned === id, stale:!view.online}]\">\r\n        <header><b>ลิฟต์ {{ id }}</b><span>{{ status(id) }}</span></header>\r\n        <div class=\"floor\"><strong>{{ view.state?.floors?.[id] ?? '—' }}</strong><span>ชั้นปัจจุบัน</span></div>\r\n        <div class=\"shaft\"><div class=\"car\" :style=\"{bottom: (((view.state?.floors?.[id] || 1)-1)/19*83)+'%'}\">{{ id }}</div><div class=\"shaft-label top\">20</div><div class=\"shaft-label bottom\">1</div></div>\r\n        <footer>{{ view.state?.assigned === id ? (ambientBusy ? 'ถูกเลือก (ถึงเร็วที่สุด)' : phaseLabel) : (etaText(id) || 'พร้อมรับงาน') }}<span v-if=\"etaText(id) && view.state?.assigned === id\"> · {{ etaText(id) }}</span></footer>\r\n      </article>\r\n    </div>\r\n    <div class=\"details\"><section><h2>หน้าจอที่บอร์ด</h2><div class=\"lcd\"><div>{{ view.state?.lcd?.[0] || 'WAITING FOR DATA' }}</div><div>{{ view.state?.lcd?.[1] || '                ' }}</div></div><p class=\"feedback\">{{ view.feedback || 'กดปุ่มบนบอร์ดหรือปุ่มเรียกลิฟต์ด้านบนเพื่อเริ่ม' }}</p><small>อัปเดตล่าสุด: {{ view.receivedAt ? new Date(view.receivedAt).toLocaleTimeString('th-TH') : '—' }}</small></section><section><h2>เหตุการณ์ล่าสุด</h2><div class=\"events\"><div v-for=\"(event,index) in (view.events || [])\" :key=\"index\"><time>{{ new Date(event.time).toLocaleTimeString('th-TH') }}</time><span>{{ event.text }}</span></div><p v-if=\"!view.events?.length\">รอเหตุการณ์จาก ESP32</p></div></section></div>\r\n    <p class=\"mockup-note\">แบบจำลอง: เลือกชั้นที่ยืนอยู่ แล้วเรียกลิฟต์ · เลือกชั้นปลายทางในลิฟต์ · 2 วินาทีต่อชั้น · รอเลือกชั้นสูงสุด 30 วินาที</p>\r\n  </div>\r\n",
+  template: "\r\n  <div class=\"elevator-app\">\r\n    <div class=\"lift-heading\"><div><div class=\"eyebrow\">ESP32 · MQTT · NODE-RED</div><h1>ระบบลิฟต์จำลอง</h1><p>ลิฟต์ 4 ตัว · อาคาร 20 ชั้น</p></div><a class=\"navlink\" href=\"/dashboard/dataflow\">ดูการส่งข้อมูลของระบบ →</a><span class=\"connection\" :class=\"{live: view.online}\">{{ view.online ? (view.state?.emulator ? '● เชื่อมต่อแล้ว (ตัวจำลอง ESP32)' : '● เชื่อมต่อ ESP32 แล้ว') : '○ รอการเชื่อมต่อ ESP32' }}</span></div>\r\n    <div class=\"journey\"><div><small>จุดเรียก</small><strong>ชั้น {{ hall }}</strong></div><span>→</span><div><small>ปลายทาง</small><strong>{{ dest ? 'ชั้น '+dest : 'เลือกในลิฟต์' }}</strong></div><div class=\"assignment\"><small>ลิฟต์ที่ได้รับมอบหมาย</small><strong>{{ view.state?.assigned !== '-' ? (view.state?.assigned || '—') : '—' }}</strong></div><label class=\"here\"><small>ตอนนี้คุณอยู่ชั้น</small><select v-model.number=\"myFloor\" :disabled=\"!canRequest\" @change=\"send({topic:'here',payload:myFloor})\"><option v-for=\"f in padFloors\" :key=\"f\" :value=\"f\">ชั้น {{ f }}</option></select></label><button v-if=\"canEnter\" class=\"enterbtn\" @click=\"send({topic:'enter',payload:true})\">เดินเข้าลิฟต์ {{ assigned }}</button><button :disabled=\"!canRequest\" @click=\"send({topic:'verify',payload:myFloor})\">เรียกลิฟต์ (ชั้น {{ myFloor }})</button></div>\r\n    <div class=\"offline-note\" v-if=\"!view.online\">{{ view.state ? 'ขาดการเชื่อมต่อ — แสดงข้อมูลล่าสุดที่ได้รับ' : 'ยังไม่มีข้อมูลจากบอร์ด กรุณาเปิด ESP32 และเชื่อมต่อ Wi-Fi' }}</div>\r\n    <section class=\"building\">\r\n      <div class=\"trip-banner\" :class=\"tripClass\">{{ tripText }}</div>\r\n      <div class=\"bldg-grid\">\r\n        <div class=\"floor-col\"><div class=\"bhead\"></div><div v-for=\"f in floorList\" :key=\"f\" class=\"flabel\" :class=\"{hall:f===hall,dest:f===dest}\">{{ f }}<em v-if=\"f===hall\">จุดเรียก</em><em v-else-if=\"f===dest\">ปลายทาง</em></div></div>\r\n        <div v-for=\"id in ids\" :key=\"id\" class=\"bshaft\" :class=\"{assigned: assigned===id}\">\r\n          <div class=\"bhead\">ลิฟต์ {{ id }}</div>\r\n          <div class=\"bbody\">\r\n            <div v-for=\"f in floorList\" :key=\"f\" class=\"rowline\" :class=\"{hall:f===hall,dest:f===dest}\"></div>\r\n            <div v-if=\"trail(id)\" class=\"trail\" :style=\"trail(id)\"></div>\r\n            <div class=\"bcar\" :class=\"carClass(id)\" :style=\"{bottom:(floorOf(id)-1)*24+2+'px'}\"><span class=\"cid\">{{ id }}</span><span class=\"cfl\">{{ floorOf(id) }}</span><span class=\"carrow\">{{ arrow(id) }}</span></div>\r\n          </div>\r\n        </div>\r\n      </div>\r\n    </section>\r\n    <section class=\"floorpad\" :class=\"{disabled:!canSelect}\">\r\n      <h2>แผงปุ่มในลิฟต์ {{ assigned || '' }} <small>{{ canSelect ? (typed ? 'แป้นกดที่บอร์ดกำลังกด '+typed+' (รอ #)' : 'กดเลือกชั้น หรือใช้แป้นกดที่บอร์ด ESP32 (ตัวเลข + #)') : (dest ? 'เลือกชั้น '+dest+' แล้ว' : (canEnter ? 'เดินเข้าลิฟต์ก่อน' : 'ปุ่มจะใช้ได้เมื่อลิฟต์มาถึง ประตูเปิด และคุณเดินเข้าไปแล้ว')) }}</small></h2>\r\n      <div class=\"pad\"><button v-for=\"f in padFloors\" :key=\"f\" :class=\"{chosen:f===dest}\" :disabled=\"!canSelect || f===floorOf(assigned)\" @click=\"send({topic:'select',payload:f})\">{{ f }}</button></div>\r\n    </section>\r\n    <div class=\"lift-cards\">\r\n      <article v-for=\"id in ['A','B','C','D']\" :key=\"id\" :class=\"['lift-card',{assigned: view.state?.assigned === id, stale:!view.online}]\">\r\n        <header><b>ลิฟต์ {{ id }}</b><span>{{ status(id) }}</span></header>\r\n        <div class=\"floor\"><strong>{{ view.state?.floors?.[id] ?? '—' }}</strong><span>ชั้นปัจจุบัน</span></div>\r\n        <div class=\"shaft\"><div class=\"car\" :style=\"{bottom: (((view.state?.floors?.[id] || 1)-1)/19*83)+'%'}\">{{ id }}</div><div class=\"shaft-label top\">20</div><div class=\"shaft-label bottom\">1</div></div>\r\n        <footer>{{ view.state?.assigned === id ? (ambientBusy ? 'ถูกเลือก (ถึงเร็วที่สุด)' : phaseLabel) : (etaText(id) || 'พร้อมรับงาน') }}<span v-if=\"etaText(id) && view.state?.assigned === id\"> · {{ etaText(id) }}</span></footer>\r\n      </article>\r\n    </div>\r\n    <div class=\"details\"><section><h2>หน้าจอที่บอร์ด</h2><div class=\"lcd\"><div>{{ view.state?.lcd?.[0] || 'WAITING FOR DATA' }}</div><div>{{ view.state?.lcd?.[1] || '                ' }}</div></div><p class=\"feedback\">{{ view.feedback || 'กดปุ่มบนบอร์ดหรือปุ่มเรียกลิฟต์ด้านบนเพื่อเริ่ม' }}</p><small>อัปเดตล่าสุด: {{ view.receivedAt ? new Date(view.receivedAt).toLocaleTimeString('th-TH') : '—' }}</small></section><section><h2>เหตุการณ์ล่าสุด</h2><div class=\"events\"><div v-for=\"(event,index) in (view.events || [])\" :key=\"index\"><time>{{ new Date(event.time).toLocaleTimeString('th-TH') }}</time><span>{{ event.text }}</span></div><p v-if=\"!view.events?.length\">รอเหตุการณ์จาก ESP32</p></div></section></div>\r\n    <p class=\"mockup-note\">แบบจำลอง: เลือกชั้นที่ยืนอยู่ แล้วเรียกลิฟต์ · เลือกชั้นปลายทางในลิฟต์ · 2 วินาทีต่อชั้น · รอเลือกชั้นสูงสุด 30 วินาที</p>\r\n  </div>\r\n",
   data() { return { ...component.data(), msg: { payload: {} } }; },
   methods: { ...component.methods,
     send(m) {
-      if (m && m.topic === 'select') S.selectFloor(t, m.payload); else S.request(t, Number(m.payload) || 0);
+      if (m && m.topic === 'select') S.selectFloor(t, m.payload);
+      else if (m && m.topic === 'enter') S.enter(t);
+      else if (m && m.topic === 'here') S.setHall(Number(m.payload));
+      else S.request(t, Number(m.payload) || 0);
       this.sync();
     },
     sync() {

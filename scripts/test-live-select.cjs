@@ -1,5 +1,5 @@
 // End-to-end check against the REAL ESP32 over MQTT (no browser, no simulation):
-// hall call -> board assigns a car -> choose a floor -> board rides -> arrived.
+// hall call -> board assigns a car -> walk in -> choose a floor -> board rides -> arrived.
 // Usage: MQTT_HOST=127.0.0.1 node scripts/test-live-select.cjs [floor]
 // Run it on the Raspberry Pi (broker on localhost) or on Windows. Board must be
 // online and idle/arrived. Takes up to ~1-2 minutes depending on car position.
@@ -25,8 +25,11 @@ client.on('message', (topic, buf, packet) => {
   if (step === 'wait-live' && ['idle', 'arrived'].includes(state.phase)) {
     log('board live, floors ' + JSON.stringify(state.floors) + '. Hall call at floor ' + state.hall_floor);
     send({ action: 'verify' }); step = 'wait-boarding';
-  } else if (step === 'wait-boarding' && state.phase === 'boarding' && state.destination === 0) {
-    log('car ' + car + ' open at floor ' + state.hall_floor + '. LCD: ' + state.lcd.join(' / ') + '. Choosing floor ' + floor);
+  } else if (step === 'wait-boarding' && state.phase === 'boarding' && !state.boarded) {
+    log('car ' + car + ' open at floor ' + state.hall_floor + '. LCD: ' + state.lcd.join(' / ') + '. Walking in');
+    send({ action: 'enter' }); step = 'wait-inside';
+  } else if (step === 'wait-inside' && state.phase === 'boarding' && state.boarded && state.destination === 0) {
+    log('inside car ' + car + '. LCD: ' + state.lcd.join(' / ') + '. Choosing floor ' + floor);
     send({ action: 'select', floor }); step = 'wait-riding';
   } else if (step === 'wait-riding' && state.phase === 'riding') {
     log('riding to ' + state.destination + ' (car ' + car + ' at ' + state.floors[car] + ')'); step = 'wait-arrived';
