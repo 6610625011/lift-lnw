@@ -12,7 +12,7 @@ const { createSim } = require('./lib/sim-core.cjs');
 const boot = crypto.randomBytes(8).toString('hex');
 const t0 = Date.now(), uptime = () => Date.now() - t0;
 const S = createSim({ config: {
-  stepMs: 2000 / SPEED, doorMs: 2000 / SPEED, selectTimeoutMs: 30000 / SPEED, arrivalMs: 10000 / SPEED,
+  stepMs: 2000 / SPEED, doorMs: 10000 / SPEED, selectTimeoutMs: 30000 / SPEED, arrivalMs: 10000 / SPEED,
   ambientCheckMs: 3000 / SPEED, ambientDwellMs: 4000 / SPEED,
 } });
 const sim = S.sim, lcd = S.lcd;
@@ -77,13 +77,16 @@ client.on('message', (topic, buf) => {
   }
   const act = m.action;
   const call = act === 'verify' || act === 'call', select = act === 'select', enter = act === 'enter', here = act === 'here';
-  if (!(call || select || enter || here) || !m.request_id || m.request_id.length > 64 || typeof m.boot_id !== 'string' || m.boot_id.length !== 16 || !Number.isInteger(m.issued_uptime_ms)) return;
+  if (!(call || select || enter || here)) return;
+  const req_id = m.request_id || `req-${Date.now()}`;
+  const req_boot = (typeof m.boot_id === 'string' && m.boot_id.length === 16) ? m.boot_id : boot;
+  const req_uptime = Number.isInteger(m.issued_uptime_ms) ? m.issued_uptime_ms : uptime();
   if ((select || here) && !(Number.isInteger(m.floor) && m.floor >= 1 && m.floor <= 20)) return;
   let result;
-  const dup = previous.find((p) => p.id === m.request_id);
-  if (m.boot_id !== boot) result = 'expired';
+  const dup = previous.find((p) => p.id === req_id);
+  if (req_boot !== boot) result = 'expired';
   else if (dup) result = dup.result;
-  else if (uptime() - m.issued_uptime_ms > 5000) result = 'expired';
+  else if (uptime() - req_uptime > 10000) result = 'expired';
   else if (select) { result = selectFloor(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('selected', 'dashboard'); } }
   else if (enter) { result = S.enter(Date.now()) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('boarded', 'dashboard'); } }
   else if (here) { result = S.setHall(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') publishState(); }

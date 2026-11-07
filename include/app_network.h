@@ -3,7 +3,7 @@
 
 // All socket operations run in a separate FreeRTOS task. The Arduino loop owns
 // the simulation and exchanges bounded copies through queues.
-namespace Network {
+namespace AppNetwork {
 struct Request {
   enum class Action : uint8_t { Call, Select, Enter, Here };
   Action action;

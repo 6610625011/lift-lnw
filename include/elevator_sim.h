@@ -123,8 +123,60 @@ class ElevatorSimulation {
     return true;
   }
 
+  bool emergency() const { return emergency_; }
+  bool isDoorClosing() const { return doorClosing_; }
+
+  // Door Open button: extends door open time or interrupts door closing
+  bool doorOpen(uint32_t now) {
+    if (phase_ == Phase::Boarding) {
+      if (doorClosing_) {
+        // Interrupt closing and re-open doors!
+        doorClosing_ = false;
+        selectedAt_ = now;
+        phaseStartedAt_ = now;
+        return true;
+      }
+      // If already open, extend the dwell time
+      selectedAt_ = now;
+      phaseStartedAt_ = now;
+      return true;
+    }
+    if (phase_ == Phase::Arrived) {
+      phaseStartedAt_ = now;
+      return true;
+    }
+    return false;
+  }
+
+  // Door Close button: initiates 3-second closing sequence (interruptible by Door Open)
+  bool doorClose(uint32_t now) {
+    if (phase_ == Phase::Boarding) {
+      if (destination_ != 0 && !doorClosing_) {
+        doorClosing_ = true;
+        doorClosingStartedAt_ = now;
+        return true;
+      }
+      return true; // Already closing or acknowledged
+    }
+    if (phase_ == Phase::Arrived) {
+      go(Phase::Idle, now);
+      return true;
+    }
+    return false;
+  }
+
+  // Emergency Stop button: halts the elevator
+  bool toggleEmergency(uint32_t now) {
+    emergency_ = !emergency_;
+    lastStepAt_ = now;
+    return emergency_;
+  }
+
   // Returns true when anything visible changed (a floor, a phase, a target).
   bool tick(uint32_t now) {
+    if (emergency_) {
+      return false;
+    }
     bool changed = false;
 
     // Background trips advance for every car except the one serving the user.
@@ -175,9 +227,19 @@ class ElevatorSimulation {
       }
       case Phase::Boarding:
         if (destination_ != 0) {
-          if (static_cast<uint32_t>(now - selectedAt_) >=
-              Config::kDoorCloseMs) {
-            go(Phase::Riding, now);
+          if (doorClosing_) {
+            // Door is closing (3 seconds). If not interrupted by doorOpen, proceed to Riding.
+            if (static_cast<uint32_t>(now - doorClosingStartedAt_) >=
+                Config::kDoorClosingMs) {
+              doorClosing_ = false;
+              go(Phase::Riding, now);
+              changed = true;
+            }
+          } else if (static_cast<uint32_t>(now - selectedAt_) >=
+                     Config::kDoorOpenDwellMs) {
+            // Open dwell time expired (7 seconds), begin 3-second closing sequence.
+            doorClosing_ = true;
+            doorClosingStartedAt_ = now;
             changed = true;
           }
         } else if (static_cast<uint32_t>(now - phaseStartedAt_) >=
@@ -202,6 +264,11 @@ class ElevatorSimulation {
   }
 
   void screen(char (&top)[17], char (&bottom)[17]) const {
+    if (emergency_) {
+      snprintf(top, sizeof(top), "! EMERGENCY !");
+      snprintf(bottom, sizeof(bottom), "LIFT HALTED");
+      return;
+    }
     if (phase_ == Phase::Idle) {
       snprintf(top, sizeof(top), "F%02d PRESS VERIFY", hall_);
       snprintf(bottom, sizeof(bottom), "A%02d B%02d C%02d D%02d",
@@ -222,7 +289,11 @@ class ElevatorSimulation {
           snprintf(bottom, sizeof(bottom), "PRESS TO ENTER");
         } else if (destination_ != 0) {
           snprintf(top, sizeof(top), "LIFT %c TO F%02d", car.id, destination_);
-          snprintf(bottom, sizeof(bottom), "DOORS CLOSING");
+          if (doorClosing_) {
+            snprintf(bottom, sizeof(bottom), ">DOORS CLOSING<");
+          } else {
+            snprintf(bottom, sizeof(bottom), "DOOR OPEN");
+          }
         } else {
           snprintf(top, sizeof(top), "INSIDE LIFT %c", car.id);
           if (entry_ > 0) {
@@ -278,6 +349,8 @@ class ElevatorSimulation {
     }
     phaseStartedAt_ = now;
     lastStepAt_ = now;
+    doorClosing_ = false;
+    doorClosingStartedAt_ = 0;
   }
 
   // Time (ms) until car i could be standing at `floor`, ready to take the user.
@@ -386,4 +459,7 @@ class ElevatorSimulation {
   uint32_t lastSpawnCheck_ = 0;
   uint32_t rng_ = 0x2545F491u;
   bool ambient_;
+  bool emergency_ = false;
+  bool doorClosing_ = false;
+  uint32_t doorClosingStartedAt_ = 0;
 };

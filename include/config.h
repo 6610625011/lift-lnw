@@ -6,11 +6,12 @@ namespace Config {
 constexpr uint8_t kDisplaySda = 21;
 constexpr uint8_t kDisplayScl = 22;
 constexpr uint8_t kStatusLed = 25;
-constexpr uint8_t kVerifyButton = 27;
-// 4x4 membrane keypad (optional; nothing happens if it is not wired).
-// Rows are driven LOW one at a time, columns are INPUT_PULLUP.
-constexpr uint8_t kKeypadRows[4] = {13, 14, 16, 17};
-constexpr uint8_t kKeypadCols[4] = {18, 19, 32, 33};
+
+// Car Unit (ESP32) Physical Buttons:
+constexpr uint8_t kEmergencyButton = 27;  // Emergency Stop (GPIO 27 -> GND)
+constexpr uint8_t kDoorOpenButton  = 32;  // Door Open (GPIO 32 -> GND)
+constexpr uint8_t kDoorCloseButton = 33;  // Door Close (GPIO 33 -> GND)
+constexpr uint8_t kVerifyButton = 27;     // Legacy alias
 
 constexpr uint8_t kDisplayColumns = 16;
 constexpr uint8_t kDisplayRows = 2;
@@ -26,7 +27,9 @@ constexpr int kInitialFloors[4] = {5, 14, 3, 9};  // Elevators A, B, C, D.
 constexpr uint32_t kDebounceMs = 35;
 constexpr uint32_t kTravelPerFloorMs = 2000;
 constexpr uint32_t kSelectTimeoutMs = 30000;  // Wait for a floor choice.
-constexpr uint32_t kDoorCloseMs = 2000;         // Doors close after the choice.
+constexpr uint32_t kDoorOpenDwellMs = 7000;     // Doors stay open for 7 seconds.
+constexpr uint32_t kDoorClosingMs   = 3000;     // Doors closing duration (3s, interruptible by Door Open).
+constexpr uint32_t kDoorCloseMs     = 10000;    // Total stop time (7s open + 3s close = 10s per exam).
 // Background traffic: other (imaginary) passengers keep the cars busy.
 constexpr bool kAmbientEnabled = true;
 constexpr uint32_t kAmbientCheckMs = 3000;     // How often a new trip may start.

@@ -37,9 +37,27 @@
     "wires": [
       [
         "monitor",
-        "wirelog"
+        "wirelog",
+        "debug-mqtt"
       ]
     ]
+  },
+  {
+    "id": "debug-mqtt",
+    "type": "debug",
+    "z": "mockup",
+    "name": "MQTT Live Messages",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 420,
+    "y": 60,
+    "wires": []
   },
   {
     "id": "broker-status",
@@ -201,7 +219,7 @@
     "type": "function",
     "z": "mockup",
     "name": "Fresh request + unique ID",
-    "func": "// msg.topic selects the request sent to the ESP32 (msg.payload = floor where needed):\n//   'here'   tell the board which floor the passenger stands on (idle/arrived only, fire-and-forget)\n//   'verify' hall call; payload = floor where the passenger stands (optional)\n//   'enter'  passenger walks into the car that is waiting with doors open\n//   'select' floor chosen inside the car (after walking in)\nconst model=flow.get('model');\nconst now=Date.now();\nif (!model || !model.online || now-model.liveAt>3000) return null;\nconst st=model.state, phase=st.phase;\nconst body={request_id:null,boot_id:st.boot_id,issued_uptime_ms:st.uptime_ms};\nconst id=now.toString(36)+'-'+Math.random().toString(36).slice(2,14);\nbody.request_id=id;\nconst out=()=>({topic:'elevator/v1/mockup/request',retain:false,qos:'1',payload:JSON.stringify(body)});\nif (msg.topic==='here') {\n    const floor=Number(msg.payload);\n    if (!['idle','arrived'].includes(phase) || !Number.isInteger(floor) || floor<1 || floor>20) return null;\n    body.action='here'; body.floor=floor;\n    return out();   // Not tracked as pending: the next click must not be blocked by it.\n}\nif (model.pending) return null;\nif (msg.topic==='select') {\n    const floor=Number(msg.payload);\n    if (phase!=='boarding' || !st.boarded || st.destination!==0 || !Number.isInteger(floor) || floor<1 || floor>20 || floor===st.floors[st.assigned]) return null;\n    body.action='select'; body.floor=floor;\n    model.feedback='กำลังส่งชั้น '+floor+' ไปที่ ESP32…';\n} else if (msg.topic==='enter') {\n    if (phase!=='boarding' || st.boarded) return null;\n    body.action='enter';\n    model.feedback='กำลังส่งคำสั่งเดินเข้าลิฟต์ไปที่ ESP32…';\n} else {\n    if (!['idle','arrived'].includes(phase)) return null;\n    body.action='verify';\n    const here=Number(msg.payload);\n    if (Number.isInteger(here) && here>=1 && here<=20) body.floor=here;\n    model.feedback='กำลังส่งคำขอเรียกลิฟต์จากชั้น '+(body.floor||st.hall_floor)+' ไปที่ ESP32…';\n}\nmodel.pending={id,time:now};\nflow.set('model',model);\nreturn out();\n",
+    "func": "// msg.topic selects the request sent to the ESP32 (msg.payload = floor where needed):\r\n//   'here'   tell the board which floor the passenger stands on (idle/arrived only, fire-and-forget)\r\n//   'verify' hall call; payload = floor where the passenger stands (optional)\r\n//   'enter'  passenger walks into the car that is waiting with doors open\r\n//   'select' floor chosen inside the car (after walking in)\r\nconst model=flow.get('model');\r\nconst now=Date.now();\r\nif (!model || !model.online || now-model.liveAt>3000) return null;\r\nconst st=model.state, phase=st.phase;\r\nconst body={request_id:null,boot_id:st.boot_id,issued_uptime_ms:st.uptime_ms};\r\nconst id=now.toString(36)+'-'+Math.random().toString(36).slice(2,14);\r\nbody.request_id=id;\r\nconst out=()=>({topic:'elevator/v1/mockup/request',retain:false,qos:'1',payload:JSON.stringify(body)});\r\nif (msg.topic==='here') {\r\n    const floor=Number(msg.payload);\r\n    if (!['idle','arrived'].includes(phase) || !Number.isInteger(floor) || floor<1 || floor>20) return null;\r\n    body.action='here'; body.floor=floor;\r\n    return out();   // Not tracked as pending: the next click must not be blocked by it.\r\n}\r\nif (model.pending) return null;\r\nif (msg.topic==='select') {\r\n    const floor=Number(msg.payload);\r\n    if (phase!=='boarding' || !st.boarded || st.destination!==0 || !Number.isInteger(floor) || floor<1 || floor>20 || floor===st.floors[st.assigned]) return null;\r\n    body.action='select'; body.floor=floor;\r\n    model.feedback='กำลังส่งชั้น '+floor+' ไปที่ ESP32…';\r\n} else if (msg.topic==='enter') {\r\n    if (phase!=='boarding' || st.boarded) return null;\r\n    body.action='enter';\r\n    model.feedback='กำลังส่งคำสั่งเดินเข้าลิฟต์ไปที่ ESP32…';\r\n} else {\r\n    if (!['idle','arrived'].includes(phase)) return null;\r\n    body.action='verify';\r\n    const here=Number(msg.payload);\r\n    if (Number.isInteger(here) && here>=1 && here<=20) body.floor=here;\r\n    model.feedback='กำลังส่งคำขอเรียกลิฟต์จากชั้น '+(body.floor||st.hall_floor)+' ไปที่ ESP32…';\r\n}\r\nmodel.pending={id,time:now};\r\nflow.set('model',model);\r\nreturn out();\r\n",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",

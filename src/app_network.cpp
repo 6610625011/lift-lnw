@@ -2,10 +2,10 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
-#include "network.h"
+#include "app_network.h"
 #include "secrets.h"
 
-namespace Network {
+namespace AppNetwork {
 namespace {
 constexpr char kState[] = "elevator/v1/mockup/state";
 constexpr char kEvents[] = "elevator/v1/mockup/events";
@@ -36,8 +36,14 @@ void callback(char*, byte* payload, unsigned int length) {
   const bool select = !strcmp(action, "select");
   const bool enter = !strcmp(action, "enter");
   const bool here = !strcmp(action, "here");
-  if ((!call && !select && !enter && !here) || !*id || strlen(id) > 64 ||
-      strlen(bootId) != 16 || !doc["issued_uptime_ms"].is<uint32_t>()) return;
+  if (!call && !select && !enter && !here) return;
+
+  char reqIdBuf[65];
+  if (!*id) {
+    snprintf(reqIdBuf, sizeof(reqIdBuf), "req-%lu", millis());
+    id = reqIdBuf;
+  }
+  if (strlen(id) > 64) return;
   if ((select || here) && (!doc["floor"].is<int>() || doc["floor"].as<int>() < Config::kMinFloor ||
                  doc["floor"].as<int>() > Config::kMaxFloor)) return;
   Request request{};
@@ -48,8 +54,8 @@ void callback(char*, byte* payload, unsigned int length) {
   if (call && request.floor != 0 &&
       (request.floor < Config::kMinFloor || request.floor > Config::kMaxFloor)) return;
   strlcpy(request.id, id, sizeof(request.id));
-  strlcpy(request.boot, bootId, sizeof(request.boot));
-  request.issuedAt = doc["issued_uptime_ms"];
+  strlcpy(request.boot, strlen(bootId) == 16 ? bootId : boot, sizeof(request.boot));
+  request.issuedAt = doc["issued_uptime_ms"].is<uint32_t>() ? doc["issued_uptime_ms"].as<uint32_t>() : millis();
   xQueueSend(requests, &request, 0);
 }
 
@@ -129,9 +135,9 @@ void worker(void*) {
 
 const char* bootId() { return boot; }
 void diagnostics() {
-  Serial.printf("Network: worker age=%lu ms, stage=%u, MQTT=%s, heap=%u, WiFi=%d\n",
+  Serial.printf("Network: worker age=%lu ms, stage=%u, MQTT=%s, heap=%lu, WiFi=%d\n",
                 static_cast<unsigned long>(millis()-lastWorkerAt),workerStage,
-                brokerConnected ? "connected" : "disconnected", ESP.getFreeHeap(), WiFi.status());
+                brokerConnected ? "connected" : "disconnected", static_cast<unsigned long>(ESP.getFreeHeap()), WiFi.status());
 }
 void begin() {
   snprintf(boot, sizeof(boot), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());

@@ -5,7 +5,8 @@ const func=name=>fs.readFileSync(dir+name,'utf8');
 const flows=[
 {id:'mockup',type:'tab',label:'ESP32 Elevator A–D',disabled:false,info:'ESP32 authoritative four-car mockup. Windows Mosquitto + Node-RED.'},
 {id:'mqtt-local',type:'mqtt-broker',name:'Windows Mosquitto',broker:'127.0.0.1',port:'1883',clientid:'node-red-elevator',autoConnect:true,usetls:false,protocolVersion:'4',keepalive:'15',cleansession:true,autoUnsubscribe:true},
-{id:'state-in',type:'mqtt in',z:'mockup',name:'ESP32 state + events',topic:'elevator/v1/mockup/+',qos:'1',datatype:'utf8',broker:'mqtt-local',nl:false,rap:true,rh:0,x:160,y:100,wires:[['monitor','wirelog']]},
+{id:'state-in',type:'mqtt in',z:'mockup',name:'ESP32 state + events',topic:'elevator/v1/mockup/+',qos:'1',datatype:'utf8',broker:'mqtt-local',nl:false,rap:true,rh:0,x:160,y:100,wires:[['monitor','wirelog','debug-mqtt']]},
+{id:'debug-mqtt',type:'debug',z:'mockup',name:'MQTT Live Messages',active:true,tosidebar:true,console:false,tostatus:false,complete:'payload',targetType:'msg',statusVal:'',statusType:'auto',x:420,y:60,wires:[]},
 {id:'broker-status',type:'status',z:'mockup',name:'Broker connection',scope:['state-in'],x:160,y:160,wires:[['broker-topic']]},
 {id:'broker-topic',type:'change',z:'mockup',name:'Broker status topic',rules:[{t:'set',p:'topic',pt:'msg',to:'broker-status',tot:'str'}],x:390,y:160,wires:[['monitor']]},
 {id:'heartbeat',type:'inject',z:'mockup',name:'Check stale data each second',props:[{p:'topic',vt:'str'},{p:'payload'}],topic:'tick',payload:'',payloadType:'date',repeat:'1',once:true,onceDelay:0.5,x:200,y:220,wires:[['monitor','wirelog']]},

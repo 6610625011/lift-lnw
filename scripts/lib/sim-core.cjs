@@ -4,7 +4,7 @@
 function createSim(options = {}) {
   const C = {
     initial: [5, 14, 3, 9], home: 1, minFloor: 1, maxFloor: 20,
-    stepMs: 2000, doorMs: 2000, selectTimeoutMs: 30000, arrivalMs: 10000,
+    stepMs: 2000, doorMs: 10000, selectTimeoutMs: 30000, arrivalMs: 10000,
     ambientCheckMs: 3000, ambientPercent: 55, ambientMaxBusy: 2, ambientDwellMs: 4000,
     ...options.config,
   };

@@ -6,7 +6,7 @@
 
 #include "config.h"
 #include "elevator_sim.h"
-#include "network.h"
+#include "app_network.h"
 
 namespace {
 // Automatically identify the expander-to-LCD pin mapping at the scanned address.
@@ -18,9 +18,6 @@ bool displayDirty = true;
 bool i2cReady = false;
 char lastDisplayRows[2][17] = {};
 
-bool lastRawButton = HIGH;
-bool stableButton = HIGH;
-uint32_t rawButtonChangedAt = 0;
 
 bool addressResponds(uint8_t address) {
   Wire.beginTransmission(address);
@@ -114,7 +111,7 @@ void updateSerialDiagnostics() {
   } else if (command == 't' || command == 'T') {
     testLcdMemory();
   } else if (command == 'n' || command == 'N') {
-    Network::diagnostics();
+    AppNetwork::diagnostics();
   }
 }
 
@@ -132,8 +129,8 @@ bool onVerificationPressed(uint32_t now, const char* source = "button", int hall
 
   displayDirty = true;
   logSimulation();
-  Network::publishState(simulation);
-  Network::event("assigned", source);
+  AppNetwork::publishState(simulation);
+  AppNetwork::event("assigned", source);
   return true;
 }
 
@@ -144,8 +141,8 @@ bool onFloorSelected(uint32_t now, int floor, const char* source = "dashboard") 
   }
   displayDirty = true;
   logSimulation();
-  Network::publishState(simulation);
-  Network::event("selected", source);
+  AppNetwork::publishState(simulation);
+  AppNetwork::event("selected", source);
   return true;
 }
 
@@ -157,8 +154,8 @@ bool onEnterCar(uint32_t now, const char* source) {
   }
   displayDirty = true;
   logSimulation();
-  Network::publishState(simulation);
-  Network::event("boarded", source);
+  AppNetwork::publishState(simulation);
+  AppNetwork::event("boarded", source);
   return true;
 }
 
@@ -169,109 +166,108 @@ bool onHereSet(int floor) {
   }
   displayDirty = true;
   logSimulation();
-  Network::publishState(simulation);
+  AppNetwork::publishState(simulation);
   return true;
 }
 
-// The one physical button means different things as the journey progresses:
-// idle/arrived = call a lift from the chosen floor, doors open = walk in.
-void onButtonPressed(uint32_t now) {
-  const auto phase = simulation.phase();
-  if (phase == ElevatorSimulation::Phase::Boarding && !simulation.boarded()) {
-    onEnterCar(now, "button");
-  } else {
-    onVerificationPressed(now);
-  }
-}
-
-// ---- 4x4 keypad (floor entry inside the lift) -------------------------------
-// Digits build a floor number, '*' clears it, '#' confirms.
-const char kKeymap[4][4] = {{'1', '2', '3', 'A'}, {'4', '5', '6', 'B'},
-                            {'7', '8', '9', 'C'}, {'*', '0', '#', 'D'}};
-char lastRawKey = 0;
-char stableKey = 0;
-uint32_t rawKeyChangedAt = 0;
-int keypadEntry = 0;
-
-char scanKeypad() {
-  char found = 0;
-  for (uint8_t r = 0; r < 4; ++r) {
-    for (uint8_t i = 0; i < 4; ++i) {
-      digitalWrite(Config::kKeypadRows[i], i == r ? LOW : HIGH);
-    }
-    delayMicroseconds(10);
-    for (uint8_t c = 0; c < 4; ++c) {
-      if (digitalRead(Config::kKeypadCols[c]) == LOW) {
-        found = kKeymap[r][c];
-      }
-    }
-  }
-  for (uint8_t i = 0; i < 4; ++i) {
-    digitalWrite(Config::kKeypadRows[i], HIGH);
-  }
-  return found;
-}
-
-void onKeyPressed(uint32_t now, char key) {
-  const bool typing = simulation.phase() == ElevatorSimulation::Phase::Boarding &&
-                      simulation.boarded() && simulation.destination() == 0;
-  if (!typing) {
-    Serial.printf("Key '%c' ignored (walk in first, then key a floor).\n", key);
-    return;
-  }
-  keypadEntry = simulation.entry();  // Stay in sync (the sim clears it per journey).
-  if (key >= '0' && key <= '9') {
-    const int next = keypadEntry * 10 + (key - '0');
-    keypadEntry = next > Config::kMaxFloor ? (key - '0') : next;  // Restart on overflow.
-  } else if (key == '*') {
-    keypadEntry = 0;
-  } else if (key == '#') {
-    const int floor = keypadEntry;
-    keypadEntry = 0;
-    simulation.setEntry(0);
-    if (!onFloorSelected(now, floor, "keypad")) {
-      displayDirty = true;  // Rejected: show the prompt again.
-    }
-    return;
-  } else {
-    return;
-  }
-  simulation.setEntry(keypadEntry);
-  displayDirty = true;
-  logSimulation();
-  Network::publishState(simulation);
-}
-
 void updateKeypad(uint32_t now) {
-  const char raw = scanKeypad();
-  if (raw != lastRawKey) {
-    lastRawKey = raw;
-    rawKeyChangedAt = now;
+  (void)now;
+}
+
+bool lastRawEmergency = HIGH, stableEmergency = HIGH;
+uint32_t rawEmergencyChangedAt = 0;
+
+bool lastRawDoorOpen = HIGH, stableDoorOpen = HIGH;
+uint32_t rawDoorOpenChangedAt = 0;
+
+bool lastRawDoorClose = HIGH, stableDoorClose = HIGH;
+uint32_t rawDoorCloseChangedAt = 0;
+
+void onEmergencyPressed(uint32_t now) {
+  const bool active = simulation.toggleEmergency(now);
+  displayDirty = true;
+  Serial.printf("[Car Unit] Emergency Stop button pressed! Emergency: %s\n",
+                active ? "ACTIVE" : "CLEARED");
+  AppNetwork::event(active ? "emergency_active" : "emergency_cleared", "button");
+  AppNetwork::publishState(simulation);
+}
+
+void onDoorOpenPressed(uint32_t now) {
+  Serial.println("[Car Unit] >>> Button D32 (DOOR OPEN) Pressed! <<<");
+  const bool wasClosing = simulation.isDoorClosing();
+  if (simulation.doorOpen(now)) {
+    displayDirty = true;
+    if (wasClosing) {
+      Serial.println("  -> Action: Door closing INTERRUPTED! Re-opening doors.");
+      AppNetwork::event("door_reopen", "button");
+    } else {
+      Serial.println("  -> Action: Doors extended / kept open.");
+      AppNetwork::event("door_open", "button");
+    }
+    AppNetwork::publishState(simulation);
+  } else {
+    Serial.printf("  -> Note: Lift is currently idle/moving (Buttons active when doors are open).\n");
   }
-  if (raw != stableKey &&
-      static_cast<uint32_t>(now - rawKeyChangedAt) >= Config::kDebounceMs) {
-    stableKey = raw;
-    if (stableKey != 0) {
-      onKeyPressed(now, stableKey);
+}
+
+void onDoorClosePressed(uint32_t now) {
+  Serial.println("[Car Unit] >>> Button D33 (DOOR CLOSE) Pressed! <<<");
+  if (simulation.doorClose(now)) {
+    displayDirty = true;
+    Serial.println("  -> Action: Door closing initiated (3 seconds)... Press Door Open (D32) to interrupt.");
+    AppNetwork::event("door_close", "button");
+    AppNetwork::publishState(simulation);
+  } else {
+    Serial.printf("  -> Note: Lift is currently idle/moving (Buttons active when doors are open).\n");
+  }
+}
+
+void updateButtons(uint32_t now) {
+  // 1. Emergency Button (GPIO 27)
+  const bool rawEmer = digitalRead(Config::kEmergencyButton);
+  if (rawEmer != lastRawEmergency) {
+    lastRawEmergency = rawEmer;
+    rawEmergencyChangedAt = now;
+  }
+  if (rawEmer != stableEmergency &&
+      static_cast<uint32_t>(now - rawEmergencyChangedAt) >= Config::kDebounceMs) {
+    stableEmergency = rawEmer;
+    if (stableEmergency == LOW) {
+      onEmergencyPressed(now);
+    }
+  }
+
+  // 2. Door Open Button (GPIO 32)
+  const bool rawOpen = digitalRead(Config::kDoorOpenButton);
+  if (rawOpen != lastRawDoorOpen) {
+    lastRawDoorOpen = rawOpen;
+    rawDoorOpenChangedAt = now;
+  }
+  if (rawOpen != stableDoorOpen &&
+      static_cast<uint32_t>(now - rawDoorOpenChangedAt) >= Config::kDebounceMs) {
+    stableDoorOpen = rawOpen;
+    if (stableDoorOpen == LOW) {
+      onDoorOpenPressed(now);
+    }
+  }
+
+  // 3. Door Close Button (GPIO 33)
+  const bool rawClose = digitalRead(Config::kDoorCloseButton);
+  if (rawClose != lastRawDoorClose) {
+    lastRawDoorClose = rawClose;
+    rawDoorCloseChangedAt = now;
+  }
+  if (rawClose != stableDoorClose &&
+      static_cast<uint32_t>(now - rawDoorCloseChangedAt) >= Config::kDebounceMs) {
+    stableDoorClose = rawClose;
+    if (stableDoorClose == LOW) {
+      onDoorClosePressed(now);
     }
   }
 }
 
 void updateButton(uint32_t now) {
-  const bool rawButton = digitalRead(Config::kVerifyButton);
-  if (rawButton != lastRawButton) {
-    lastRawButton = rawButton;
-    rawButtonChangedAt = now;
-  }
-
-  // Unsigned subtraction also works across millis() wraparound.
-  if (rawButton != stableButton &&
-      static_cast<uint32_t>(now - rawButtonChangedAt) >= Config::kDebounceMs) {
-    stableButton = rawButton;
-    if (stableButton == LOW) {
-      onButtonPressed(now);
-    }
-  }
+  updateButtons(now);
 }
 
 void updateTrip(uint32_t now) {
@@ -279,15 +275,20 @@ void updateTrip(uint32_t now) {
   if (simulation.tick(now)) {
     displayDirty = true;
     logSimulation();
-    Network::publishState(simulation);
+    AppNetwork::publishState(simulation);
     if (simulation.phase() != previous) {
       const char* names[] = {"ready", "coming", "pickup", "riding", "arrival"};
-      Network::event(names[static_cast<int>(simulation.phase())], "simulation");
+      AppNetwork::event(names[static_cast<int>(simulation.phase())], "simulation");
     }
   }
 }
 
 void updateStatusLed(uint32_t now) {
+  if (simulation.emergency()) {
+    // Rapid strobe during emergency
+    digitalWrite(Config::kStatusLed, ((now / 100) % 2) == 0 ? HIGH : LOW);
+    return;
+  }
   const auto phase = simulation.phase();
   bool ledOn = phase == ElevatorSimulation::Phase::Arrived ||
                phase == ElevatorSimulation::Phase::Boarding;
@@ -353,12 +354,21 @@ void setup() {
   Serial.begin(115200);
   pinMode(Config::kStatusLed, OUTPUT);
   digitalWrite(Config::kStatusLed, LOW);
-  pinMode(Config::kVerifyButton, INPUT_PULLUP);
-  for (uint8_t i = 0; i < 4; ++i) {
-    pinMode(Config::kKeypadRows[i], OUTPUT);
-    digitalWrite(Config::kKeypadRows[i], HIGH);
-    pinMode(Config::kKeypadCols[i], INPUT_PULLUP);
-  }
+  pinMode(Config::kEmergencyButton, INPUT_PULLUP);
+  pinMode(Config::kDoorOpenButton, INPUT_PULLUP);
+  pinMode(Config::kDoorCloseButton, INPUT_PULLUP);
+
+  lastRawEmergency = digitalRead(Config::kEmergencyButton);
+  stableEmergency = lastRawEmergency;
+  rawEmergencyChangedAt = millis();
+
+  lastRawDoorOpen = digitalRead(Config::kDoorOpenButton);
+  stableDoorOpen = lastRawDoorOpen;
+  rawDoorOpenChangedAt = millis();
+
+  lastRawDoorClose = digitalRead(Config::kDoorCloseButton);
+  stableDoorClose = lastRawDoorClose;
+  rawDoorCloseChangedAt = millis();
 
   delay(250);  // Allow the LCD supply to settle once at startup.
   initializeDisplay();
@@ -366,15 +376,10 @@ void setup() {
     scanI2c();
   }
   Serial.println("Diagnostics: 'i' I2C scan; 'o' retry LCD; 't' LCD memory test; 'n' network.");
-
-  // A button held during boot must be released before it can start a trip.
-  lastRawButton = digitalRead(Config::kVerifyButton);
-  stableButton = lastRawButton;
-  rawButtonChangedAt = millis();
-  Serial.println("Four elevators ready. Set your floor on the dashboard; button = call lift, then button = walk in, keypad = floor + #.");
+  Serial.println("Car Unit ready. Buttons: GPIO27 = Emergency, GPIO32 = Door Open, GPIO33 = Door Close.");
   simulation.seed(esp_random());  // Different background traffic every boot.
-  Network::begin();
-  Network::publishState(simulation);
+  AppNetwork::begin();
+  AppNetwork::publishState(simulation);
   logSimulation();
   renderDisplay();
 }
@@ -383,21 +388,21 @@ void loop() {
   const uint32_t now = millis();
   updateButton(now);
   updateKeypad(now);
-  Network::Request request;
-  if (Network::receive(request)) {
-    const char* result = Network::validate(request, now);
+  AppNetwork::Request request;
+  if (AppNetwork::receive(request)) {
+    const char* result = AppNetwork::validate(request, now);
     if (!result) {
-      if (request.action == Network::Request::Action::Select) {
+      if (request.action == AppNetwork::Request::Action::Select) {
         result = onFloorSelected(now, request.floor) ? "accepted" : "busy";
-      } else if (request.action == Network::Request::Action::Enter) {
+      } else if (request.action == AppNetwork::Request::Action::Enter) {
         result = onEnterCar(now, "dashboard") ? "accepted" : "busy";
-      } else if (request.action == Network::Request::Action::Here) {
+      } else if (request.action == AppNetwork::Request::Action::Here) {
         result = onHereSet(request.floor) ? "accepted" : "busy";
       } else {
         result = onVerificationPressed(now, "dashboard", request.floor) ? "accepted" : "busy";
       }
     }
-    Network::reply(request, result);
+    AppNetwork::reply(request, result);
   }
   updateTrip(now);
   updateStatusLed(now);
@@ -405,7 +410,7 @@ void loop() {
   updateSerialDiagnostics();
   static uint32_t lastPublished = 0;
   if (static_cast<uint32_t>(now-lastPublished) >= 1000) {
-    Network::publishState(simulation);
+    AppNetwork::publishState(simulation);
     lastPublished = now;
   }
   delay(1);  // Yield to ESP32 background tasks, not a trip/debounce timer.
