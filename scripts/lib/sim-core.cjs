@@ -4,8 +4,8 @@
 function createSim(options = {}) {
   const C = {
     initial: [5, 14, 3, 9], home: 1, minFloor: 1, maxFloor: 20,
-    stepMs: 2000, doorMs: 10000, selectTimeoutMs: 30000, arrivalMs: 10000,
-    ambientCheckMs: 3000, ambientPercent: 55, ambientMaxBusy: 2, ambientDwellMs: 4000,
+    stepMs: 2000, doorOpenMs: 7000, doorClosingMs: 3000, selectTimeoutMs: 30000, arrivalMs: 10000,
+    ambientCheckMs: 3000, ambientPercent: 55, ambientMaxBusy: 2, ambientDwellMs: 10000,
     ...options.config,
   };
   const rand = options.random || Math.random;
@@ -14,10 +14,11 @@ function createSim(options = {}) {
   const sim = {
     ambient: options.ambient !== false,
     cars: C.initial.map((floor, i) => ({ id: 'ABCD'[i], floor, assignments: 0, mode: 'free', target: 0, stepAt: 0, dwellAt: 0 })),
-    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home, boarded: false, entry: 0,
+    eta: [0, 0, 0, 0], phase: 'idle', sel: -1, dest: 0, hall: C.home, boarded: false, entry: 0, doorClosing: false, doorClosingAt: 0,
     selectedAt: 0, phaseAt: 0, lastStepAt: 0, lastSpawn: 0,
   };
-  const go = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; if (p === 'idle' || p === 'coming' || p === 'boarding') { sim.boarded = false; sim.entry = 0; } sim.phaseAt = now; sim.lastStepAt = now; };
+  const go = (p, now) => { sim.phase = p; if (p === 'idle') sim.dest = 0; if (p === 'idle' || p === 'coming' || p === 'boarding') { sim.boarded = false; sim.entry = 0; }
+    sim.doorClosing = false; sim.doorClosingAt = 0; sim.phaseAt = now; sim.lastStepAt = now; };
 
   function etaMs(i, floor, now) {
     const c = sim.cars[i];
@@ -26,7 +27,7 @@ function createSim(options = {}) {
     const remaining = Math.max(0, C.ambientDwellMs - (now - c.dwellAt));
     return remaining + dist(c.floor, floor) * C.stepMs;
   }
-  function request(now, hallFloor = 0) {
+  function request(now, hallFloor = 0, forcedCar = -1) {
     if (sim.phase !== 'idle' && sim.phase !== 'arrived') return false;
     if (hallFloor) {
       if (!Number.isInteger(hallFloor) || hallFloor < C.minFloor || hallFloor > C.maxFloor) return false;
@@ -38,6 +39,7 @@ function createSim(options = {}) {
       sim.eta[i] = Math.round(eta / 1000);
       if (i === 0 || eta < bestEta || (eta === bestEta && sim.cars[i].assignments < sim.cars[best].assignments)) { best = i; bestEta = eta; }
     }
+    if (Number.isInteger(forcedCar) && forcedCar >= 0 && forcedCar < 4) best = forcedCar;  // central's choice wins
     sim.sel = best; sim.dest = 0; sim.cars[best].assignments++;
     const car = sim.cars[best];
     go(car.mode === 'free' && car.floor === sim.hall ? 'boarding' : 'coming', now);
@@ -97,7 +99,10 @@ function createSim(options = {}) {
       car.floor += sim.dest > car.floor ? 1 : -1; sim.lastStepAt = now; changed = true;
       if (car.floor === sim.dest) go('arrived', now);
     } else if (sim.phase === 'boarding') {
-      if (sim.dest) { if (now - sim.selectedAt >= C.doorMs) { go('riding', now); changed = true; } }
+      if (sim.dest) {
+        if (sim.doorClosing) { if (now - sim.doorClosingAt >= C.doorClosingMs) { go('riding', now); changed = true; } }
+        else if (now - sim.selectedAt >= C.doorOpenMs) { sim.doorClosing = true; sim.doorClosingAt = now; changed = true; }
+      }
       else if (now - sim.phaseAt >= C.selectTimeoutMs) { sim.sel = -1; go('idle', now); changed = true; }
     } else if (sim.phase === 'arrived' && now - sim.phaseAt >= C.arrivalMs) { sim.sel = -1; go('idle', now); changed = true; }
     return changed;
@@ -109,7 +114,7 @@ function createSim(options = {}) {
       case 'coming': return [`GO TO LIFT ${c}`, `NOW:${pad(n)} HALL:${pad(sim.hall)}`];
       case 'boarding':
         if (!sim.boarded) return [`LIFT ${c} OPEN`, 'PRESS TO ENTER'];
-        if (sim.dest) return [`LIFT ${c} TO F${pad(sim.dest)}`, 'DOORS CLOSING'];
+        if (sim.dest) return [`LIFT ${c} TO F${pad(sim.dest)}`, sim.doorClosing ? '>DOORS CLOSING<' : 'DOOR OPEN'];
         return [`INSIDE LIFT ${c}`, sim.entry > 0 ? `FLOOR:${sim.entry} #=OK` : 'KEY FLOOR + #'];
       case 'riding': return [`LIFT ${c} MOVING ${sim.dest > n ? 'UP' : 'DN'}`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];
       default: return [`LIFT ${c} ARRIVED`, `NOW:${pad(n)} TO:${pad(sim.dest)}`];

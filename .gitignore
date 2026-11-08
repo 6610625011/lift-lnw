@@ -20,3 +20,7 @@ deliverables/
 
 windows/local-sim/node_modules/
 .claude/
+
+__pycache__/
+*.pyc
+windows/node-red/.flows.json.backup

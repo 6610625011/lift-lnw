@@ -33,11 +33,27 @@ except ImportError:
     HAVE_MQTT = False
 
 # ----------------- Network Configuration -----------------
-# Windows PC IP Address (Central Control Unit)
-DEFAULT_CENTRAL_IP = "10.154.104.1"
+# Never hard-code the MQTT password. Order of precedence:
+#   command-line --broker/--user/--password  >  environment ELEVATOR_MQTT_HOST / _USER / _PASS
+#   >  ../windows/local-secrets.json (same file the broker setup creates)  >  127.0.0.1 / elevator / ""
+def _load_defaults():
+    host, user, password = "127.0.0.1", "elevator", ""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "windows", "local-secrets.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                sec = json.load(f)
+            host = sec.get("mqttHost", host)
+            user = sec.get("mqttUser", user)
+            password = sec.get("mqttPassword", password)
+        except Exception:
+            pass
+    return (os.environ.get("ELEVATOR_MQTT_HOST", host),
+            os.environ.get("ELEVATOR_MQTT_USER", user),
+            os.environ.get("ELEVATOR_MQTT_PASS", password))
+
+DEFAULT_CENTRAL_IP, DEFAULT_MQTT_USER, DEFAULT_MQTT_PASS = _load_defaults()
 DEFAULT_MQTT_PORT = 1883
-DEFAULT_MQTT_USER = "elevator"
-DEFAULT_MQTT_PASS = "347689f7f1003d74756385bd"
 
 ROW_PINS = [13, 6, 5, 22]
 COL_PINS = [17, 26, 24, 23]
@@ -534,6 +550,10 @@ def main():
     parser.add_argument("--user", type=str, default=DEFAULT_MQTT_USER, help="MQTT username")
     parser.add_argument("--password", type=str, default=DEFAULT_MQTT_PASS, help="MQTT password")
     args = parser.parse_args()
+    if not args.password:
+        print("MQTT password missing: pass --password <mqttPassword> or set ELEVATOR_MQTT_PASS "
+              "(the value printed by raspberry-pi/setup-pi.sh / stored in windows/local-secrets.json).")
+        sys.exit(2)
 
     unit = HallUnit(hall_floor=args.floor, broker=args.broker, port=args.port, user=args.user, password=args.password)
     try:

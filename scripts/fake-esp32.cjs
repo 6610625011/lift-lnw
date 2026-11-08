@@ -12,11 +12,11 @@ const { createSim } = require('./lib/sim-core.cjs');
 const boot = crypto.randomBytes(8).toString('hex');
 const t0 = Date.now(), uptime = () => Date.now() - t0;
 const S = createSim({ config: {
-  stepMs: 2000 / SPEED, doorMs: 10000 / SPEED, selectTimeoutMs: 30000 / SPEED, arrivalMs: 10000 / SPEED,
-  ambientCheckMs: 3000 / SPEED, ambientDwellMs: 4000 / SPEED,
+  stepMs: 2000 / SPEED, doorOpenMs: 7000 / SPEED, doorClosingMs: 3000 / SPEED, selectTimeoutMs: 30000 / SPEED, arrivalMs: 10000 / SPEED,
+  ambientCheckMs: 3000 / SPEED, ambientDwellMs: 10000 / SPEED,
 } });
 const sim = S.sim, lcd = S.lcd;
-const request = (hall) => S.request(Date.now(), hall);
+const request = (hall, car = -1) => S.request(Date.now(), hall, car);
 const selectFloor = (f) => S.selectFloor(Date.now(), f);
 const tick = (() => {
   let prev = '';
@@ -90,7 +90,7 @@ client.on('message', (topic, buf) => {
   else if (select) { result = selectFloor(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('selected', 'dashboard'); } }
   else if (enter) { result = S.enter(Date.now()) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('boarded', 'dashboard'); } }
   else if (here) { result = S.setHall(m.floor) ? 'accepted' : 'busy'; if (result === 'accepted') publishState(); }
-  else { const from = Number.isInteger(m.floor) ? m.floor : 0; result = request(from) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('assigned', 'dashboard'); } }
+  else { const from = Number.isInteger(m.floor) ? m.floor : 0; const car = typeof m.car === 'string' && /^[A-D]$/.test(m.car) ? m.car.charCodeAt(0) - 65 : -1; result = request(from, car) ? 'accepted' : 'busy'; if (result === 'accepted') { publishState(); event('assigned', 'dashboard'); } }
   if (!dup) { previous.push({ id: m.request_id, result }); if (previous.length > 32) previous.shift(); }
   event(result, 'dashboard', m.request_id);
   console.log(`${new Date().toLocaleTimeString()} ${act}${m.floor ? ' ' + m.floor : ''} -> ${result}   LCD: ${lcd().join(' / ')}`);

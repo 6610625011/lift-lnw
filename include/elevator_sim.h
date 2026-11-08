@@ -46,7 +46,9 @@ class ElevatorSimulation {
 
   // Hall call from the floor where the passenger stands (0 = reuse the last
   // chosen hall floor, which starts at Config::kHomeFloor).
-  bool request(uint32_t now, int hallFloor = 0) {
+  // forcedCar 0..3 = the central controller already chose the car (A..D);
+  // -1 = choose here by shortest estimated time.
+  bool request(uint32_t now, int hallFloor = 0, int forcedCar = -1) {
     if (phase_ != Phase::Idle && phase_ != Phase::Arrived) {
       return false;
     }
@@ -67,6 +69,9 @@ class ElevatorSimulation {
         best = i;
         bestEta = eta;
       }
+    }
+    if (forcedCar >= 0 && forcedCar < 4) {
+      best = static_cast<size_t>(forcedCar);  // One dispatcher: the central's choice wins.
     }
     selected_ = static_cast<int>(best);
     destination_ = 0;

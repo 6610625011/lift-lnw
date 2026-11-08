@@ -8,6 +8,7 @@ struct Request {
   enum class Action : uint8_t { Call, Select, Enter, Here };
   Action action;
   int floor;  // Select only.
+  int car;    // Call only: 0..3 = car A..D chosen by the central, -1 = none.
   char id[65];
   char boot[17];
   uint32_t issuedAt;

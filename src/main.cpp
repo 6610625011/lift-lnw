@@ -121,8 +121,9 @@ void logSimulation() {
   Serial.printf("LCD: [%s] [%s]\n", top, bottom);
 }
 
-bool onVerificationPressed(uint32_t now, const char* source = "button", int hallFloor = 0) {
-  if (!simulation.request(now, hallFloor)) {
+bool onVerificationPressed(uint32_t now, const char* source = "button", int hallFloor = 0,
+                           int car = -1) {
+  if (!simulation.request(now, hallFloor, car)) {
     Serial.println("Trip already active; request ignored.");
     return false;
   }
@@ -399,7 +400,7 @@ void loop() {
       } else if (request.action == AppNetwork::Request::Action::Here) {
         result = onHereSet(request.floor) ? "accepted" : "busy";
       } else {
-        result = onVerificationPressed(now, "dashboard", request.floor) ? "accepted" : "busy";
+        result = onVerificationPressed(now, "dashboard", request.floor, request.car) ? "accepted" : "busy";
       }
     }
     AppNetwork::reply(request, result);

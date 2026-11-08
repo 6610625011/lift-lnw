@@ -35,7 +35,7 @@ constexpr bool kAmbientEnabled = true;
 constexpr uint32_t kAmbientCheckMs = 3000;     // How often a new trip may start.
 constexpr int kAmbientStartPercent = 55;       // Chance per check.
 constexpr int kAmbientMaxBusy = 2;             // Cars busy with others at once.
-constexpr uint32_t kAmbientDwellMs = 4000;     // Stop time at each trip's end.
+constexpr uint32_t kAmbientDwellMs = 10000;     // Stop time at each trip's end.
 constexpr uint32_t kArrivalDisplayMs = 10000;
 constexpr uint32_t kLedBlinkMs = 250;
 // Conservative timings for the connected character LCD.

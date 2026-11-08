@@ -12,7 +12,7 @@ RUN_USER="${SUDO_USER:-$USER}"
 
 echo "== 1/6 packages"
 sudo apt-get update -y
-sudo apt-get install -y mosquitto mosquitto-clients openssl curl ca-certificates
+sudo apt-get install -y mosquitto mosquitto-clients openssl curl ca-certificates python3 python3-paho-mqtt
 
 echo "== 2/6 Node.js >= 20"
 need_node=1
@@ -31,7 +31,7 @@ if [ ! -f "$SECRETS" ]; then
 {
   "mqttHost": "$PI_IP",
   "mqttUser": "elevator",
-  "mqttPassword": "$(openssl rand -hex 16)",
+  "mqttPassword": "${MQTT_PASSWORD:-$(openssl rand -hex 16)}",
   "credentialSecret": "$(openssl rand -hex 32)",
   "networkMode": "existing-wifi"
 }
@@ -46,7 +46,7 @@ echo "== 4/6 Mosquitto"
 sudo mosquitto_passwd -b -c /etc/mosquitto/elevator.passwd "$MQTT_USER" "$MQTT_PASS"
 sudo chown mosquitto: /etc/mosquitto/elevator.passwd 2>/dev/null || true
 sudo chmod 640 /etc/mosquitto/elevator.passwd
-printf 'user %s\ntopic readwrite elevator/v1/mockup/#\n' "$MQTT_USER" | sudo tee /etc/mosquitto/elevator.acl >/dev/null
+printf 'user %s\ntopic readwrite elevator/v1/#\n' "$MQTT_USER" | sudo tee /etc/mosquitto/elevator.acl >/dev/null
 sudo tee /etc/mosquitto/conf.d/elevator.conf >/dev/null <<CONF
 # Local-network demo broker (password + ACL, no TLS). Do not expose to the internet.
 listener 1883 0.0.0.0
@@ -77,9 +77,25 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+sudo tee /etc/systemd/system/elevator-central.service >/dev/null <<UNIT
+[Unit]
+Description=Elevator central controller (card permissions + dispatcher)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+User=$RUN_USER
+WorkingDirectory=$ROOT
+ExecStart=$(command -v python3) -u $ROOT/windows/central_controller.py --broker 127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 sudo systemctl daemon-reload
-sudo systemctl enable --now elevator-nodered
-sudo systemctl restart elevator-nodered
+sudo systemctl enable --now elevator-nodered elevator-central
+sudo systemctl restart elevator-nodered elevator-central
 
 echo "== 6/6 done"
 cat <<MSG
@@ -90,7 +106,9 @@ Put these in include/secrets.h on the PC, then upload the ESP32 firmware:
   mqttUser     = "$MQTT_USER"
   mqttPassword = "$MQTT_PASS"
   wifiSsid / wifiPassword = the SAME Wi-Fi network the Pi is on (2.4 GHz)
-Check:  systemctl status mosquitto elevator-nodered
-Live:   mosquitto_sub -h localhost -u $MQTT_USER -P '<password>' -t 'elevator/v1/mockup/#' -v
+Hall unit (keypad + LCD), on this Pi or another one:
+  python3 raspberry-pi/hall_unit.py --floor 1 --broker $PI_IP --password '<mqttPassword>'
+Check:  systemctl status mosquitto elevator-nodered elevator-central
+Live:   mosquitto_sub -h localhost -u $MQTT_USER -P '<password>' -t 'elevator/v1/#' -v
 Test:   node scripts/test-live-select.cjs 16
 MSG

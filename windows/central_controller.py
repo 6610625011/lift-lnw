@@ -48,6 +48,7 @@ class Elevator:
         self.direction = "IDLE"  # "UP", "DOWN", "IDLE"
         self.targets = []        # Scheduled stops
         self.load_percent = 0    # Current load percentage (0 - 100%)
+        self.busy_other = False  # Carrying another passenger (must finish that stop first)
         self.last_heartbeat = time.time()
         self.is_communicating = True
 
@@ -138,6 +139,26 @@ class CentralController:
                     elif phase in ["idle", "arrived"]:
                         car.direction = "IDLE"
                         car.targets = []
+
+                # Cars busy with other passengers: the ESP32 publishes where each one is heading
+                # ("targets", 0 = free). Without this the dispatcher thinks every other car is idle.
+                targets = state.get("targets") or {}
+                active = phase not in ("idle", "arrived")
+                for car_id, car in self.elevators.items():
+                    t = targets.get(car_id, 0)
+                    if not isinstance(t, int):
+                        t = 0
+                    car.busy_other = t > 0
+                    if car_id == assigned and active:
+                        if t > 0 and phase == "coming":
+                            car.targets = [t, hall_fl]   # finish the other trip, then come to us
+                        continue
+                    if t > 0:
+                        car.targets = [t]
+                        car.direction = "UP" if t > car.floor else "DOWN" if t < car.floor else "IDLE"
+                    else:
+                        car.targets = []
+                        car.direction = "IDLE"
 
                 # Automatic passenger boarding logic for destination dispatch
                 if self.pending_trip:
@@ -281,6 +302,7 @@ class CentralController:
         # Notify ESP32 via existing topic so ESP32 moves
         esp32_req = {
             "action": "verify",
+            "car": car_id,          # the ESP32 must send exactly this car (single dispatcher)
             "floor": from_floor,
             "destination": to_floor,
             "request_id": f"disp-{int(time.time()*1000)}"
@@ -329,6 +351,16 @@ class CentralController:
                 # Direct travel from current floor to hall_floor
                 dist = abs(hall_floor - cur)
                 cost = dist * 2  # 2s per floor
+
+            elif car.busy_other:
+                # This mock-up's cars finish the other passenger's stop before coming,
+                # so use the "finish existing route first" rule below.
+                temp_cost = 0
+                temp_pos = cur
+                for stop in car.targets:
+                    temp_cost += abs(stop - temp_pos) * 2 + 10  # 2s/floor + 10s stop
+                    temp_pos = stop
+                cost = temp_cost + abs(hall_floor - temp_pos) * 2
 
             elif direction == "UP" and hall_floor >= cur + 1 and dest_floor > hall_floor:
                 # Can stop and pick up on the way
@@ -396,13 +428,22 @@ class CentralController:
         hb_thread.start()
 
         print("=" * 60)
-        print("CN360 Central Control Unit is RUNNING on Windows PC")
+        print("CN360 Central Control Unit is RUNNING")
         print(f"Broker: {self.broker}:{self.port}")
         print("Commands:")
         print("  's' : Show status of all Elevators A-D")
         print("  'f' : Trigger Emergency Fire Alarm")
         print("  'q' : Quit")
         print("=" * 60)
+
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+        if not interactive:
+            print("No keyboard attached: running headless (stop with Ctrl+C / systemctl stop).")
+            try:
+                while self.running:
+                    time.sleep(1.0)
+            except KeyboardInterrupt:
+                self.running = False
 
         while self.running:
             try:
@@ -417,7 +458,15 @@ class CentralController:
                     self.trigger_fire_alarm()
                 elif cmd == 'q':
                     self.running = False
-            except (KeyboardInterrupt, EOFError):
+            except EOFError:
+                # stdin closed (systemd service / hidden window): keep running without commands.
+                print("stdin closed: continuing headless.")
+                try:
+                    while self.running:
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    self.running = False
+            except KeyboardInterrupt:
                 self.running = False
 
         self.client.loop_stop()

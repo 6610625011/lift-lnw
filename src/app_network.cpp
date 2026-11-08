@@ -51,6 +51,9 @@ void callback(char*, byte* payload, unsigned int length) {
                  : enter ? Request::Action::Enter
                  : here ? Request::Action::Here : Request::Action::Call;
   request.floor = doc["floor"].is<int>() ? doc["floor"].as<int>() : 0;
+  // Optional car letter from the central controller ("A".."D").
+  const char* car = doc["car"] | "";
+  request.car = (car[0] >= 'A' && car[0] <= 'D' && car[1] == 0) ? car[0] - 'A' : -1;
   if (call && request.floor != 0 &&
       (request.floor < Config::kMinFloor || request.floor > Config::kMaxFloor)) return;
   strlcpy(request.id, id, sizeof(request.id));

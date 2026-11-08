@@ -17,10 +17,10 @@ except ImportError:
 
 # Load credentials from local-secrets.json if available
 secrets_path = os.path.join(os.path.dirname(__file__), "..", "windows", "local-secrets.json")
-broker_host = "127.0.0.1"
+broker_host = os.environ.get("ELEVATOR_MQTT_HOST", "127.0.0.1")
 broker_port = 1883
-mqtt_user = "elevator"
-mqtt_pass = "347689f7f1003d74756385bd"
+mqtt_user = os.environ.get("ELEVATOR_MQTT_USER", "elevator")
+mqtt_pass = os.environ.get("ELEVATOR_MQTT_PASS", "")  # never hard-code; read from local-secrets.json below
 
 if os.path.exists(secrets_path):
     try:

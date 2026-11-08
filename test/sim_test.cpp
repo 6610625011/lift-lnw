@@ -74,10 +74,17 @@ int main() {
     assert(pick(sim, now, 16));
     assert(!pick(sim, now, 9));  // One choice per journey.
     assert(sim.destination() == 16);
-    expectScreen(sim, "LIFT C TO F16", "DOORS CLOSING");
-    assert(!sim.tick(now + Config::kDoorCloseMs - 1));
-    assert(sim.tick(now + Config::kDoorCloseMs));
-    now += Config::kDoorCloseMs;
+    expectScreen(sim, "LIFT C TO F16", "DOOR OPEN");
+    // Exam rule: 10 s per stop = 7 s doors open + 3 s doors closing.
+    assert(!sim.tick(now + Config::kDoorOpenDwellMs - 1));
+    assert(sim.tick(now + Config::kDoorOpenDwellMs));  // closing starts
+    expectScreen(sim, "LIFT C TO F16", ">DOORS CLOSING<");
+    assert(sim.phase() == Phase::Boarding);
+    const uint32_t stopMs = Config::kDoorOpenDwellMs + Config::kDoorClosingMs;
+    assert(stopMs == Config::kDoorCloseMs);
+    assert(!sim.tick(now + stopMs - 1));
+    assert(sim.tick(now + stopMs));
+    now += stopMs;
     assert(sim.phase() == Phase::Riding);
     expectScreen(sim, "LIFT C MOVING UP", "NOW:01 TO:16");
     runUntil(sim, now, Phase::Arrived);
@@ -204,7 +211,7 @@ int main() {
     // The floor-choice timeout counts from the moment the passenger walked in.
     assert(!sim.tick(now + Config::kSelectTimeoutMs - 1));
     assert(sim.selectFloor(now + 1000, 12));
-    expectScreen(sim, "LIFT A TO F12", "DOORS CLOSING");
+    expectScreen(sim, "LIFT A TO F12", "DOOR OPEN");
     assert(!sim.setEntry(3));           // Locked after choosing.
     runUntil(sim, now, Phase::Arrived);
     assert(sim.selectedCar()->floor == 12);
@@ -219,6 +226,48 @@ int main() {
     const uint32_t openedAt = now;
     assert(sim.tick(openedAt + Config::kSelectTimeoutMs));
     assert(sim.phase() == Phase::Idle && !sim.boarded());
+  }
+
+  {
+    // Car-unit buttons (from the team's ESP32 rework): door open / door close / emergency.
+    ElevatorSimulation sim(false);
+    uint32_t now = 0;
+    assert(sim.request(now));
+    runUntil(sim, now, Phase::Boarding);
+    assert(pick(sim, now, 9));
+    assert(sim.doorClose(now + 1000));       // Door Close: start closing early
+    assert(sim.isDoorClosing());
+    expectScreen(sim, "LIFT C TO F09", ">DOORS CLOSING<");
+    assert(sim.doorOpen(now + 2000));        // Door Open interrupts closing
+    assert(!sim.isDoorClosing());
+    expectScreen(sim, "LIFT C TO F09", "DOOR OPEN");
+    assert(!sim.tick(now + 2000 + Config::kDoorOpenDwellMs - 1));  // dwell restarted
+    assert(sim.tick(now + 2000 + Config::kDoorOpenDwellMs));
+    assert(sim.isDoorClosing());
+    // Emergency stop freezes everything until toggled again.
+    const uint32_t t0 = now + 20000;
+    assert(sim.toggleEmergency(t0) && sim.emergency());
+    expectScreen(sim, "! EMERGENCY !", "LIFT HALTED");
+    assert(!sim.tick(t0 + 60000));
+    assert(sim.phase() == Phase::Boarding);
+    assert(!sim.toggleEmergency(t0 + 61000) && !sim.emergency());
+  }
+
+  {
+    // Single dispatcher: when the central controller names a car, that car comes,
+    // even if another one is nearer (hall display and real car must match).
+    ElevatorSimulation sim(false);
+    uint32_t now = 0;
+    assert(sim.request(now, 1, 3));          // central chose D (floor 9); C (floor 3) is nearer
+    assert(sim.selectedCar()->id == 'D');
+    assert(sim.etaSeconds(2) < sim.etaSeconds(3));
+    runUntil(sim, now, Phase::Boarding);
+    assert(sim.selectedCar()->id == 'D' && sim.selectedCar()->floor == 1);
+    ElevatorSimulation other(false);
+    assert(other.request(0, 1, -1) && other.selectedCar()->id == 'C');   // no car named: nearest
+    assert(other.phase() == Phase::Coming);
+    ElevatorSimulation bad(false);
+    assert(bad.request(0, 1, 7) && bad.selectedCar()->id == 'C');        // invalid index ignored
   }
 
   {
